@@ -1,0 +1,36 @@
+/* Custom styles for Quill Rich Text Editor */
+/* Emphasis Dot Style */
+em-dot, .emphasis-dot {
+    text-emphasis: filled dot;
+    -webkit-text-emphasis: filled dot;
+    text-emphasis-position: under; 
+    -webkit-text-emphasis-position: under;
+    padding-bottom: 0.2em;
+    font-style: normal;
+    display: inline-block; /* Sometimes needed for text-emphasis on inline elements in specific browsers */
+}
+
+/* Ensure rendered HTML content in QuizTaker respects these styles */
+.rich-text-content strong { font-weight: bold; }
+.rich-text-content em { font-style: italic; }
+.rich-text-content u { text-decoration: underline; }
+.rich-text-content s { text-decoration: line-through; }
+.rich-text-content sub { vertical-align: sub; font-size: smaller; }
+.rich-text-content sup { vertical-align: super; font-size: smaller; }
+.rich-text-content em-dot, .rich-text-content .emphasis-dot {
+    text-emphasis: filled dot;
+    -webkit-text-emphasis: filled dot;
+    text-emphasis-position: under;
+    -webkit-text-emphasis-position: under;
+    font-style: normal;
+}
+
+/* Force inline display for rich text in list views */
+.rich-text-content-inline p {
+    display: inline;
+    margin: 0;
+    padding: 0;
+}
+.rich-text-content-inline {
+    display: inline;
+}

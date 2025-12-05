@@ -1,0 +1,5 @@
+{
+  "name": "QuizMaster AI",
+  "description": "An intelligent quiz platform where admins can manage questions with AI assistance, and users can take randomized quizzes with instant grading.",
+  "requestFramePermissions": []
+}
