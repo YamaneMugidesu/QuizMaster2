@@ -1,6 +1,7 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { Question, QuestionType, Difficulty, GradeLevel, QuestionCategory } from '../types';
 import { Button } from './Button';
+import { ImageWithPreview } from './ImageWithPreview';
 // import { RichTextEditor } from './RichTextEditor';
 
 // Lazy load RichTextEditor to prevent initial bundle crash if Quill fails
@@ -345,7 +346,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
                     <div className="flex flex-wrap gap-4 mt-2">
                         {imageUrls.map((url, idx) => (
                              <div key={idx} className="relative w-32 h-24 bg-gray-100 rounded-lg overflow-hidden border border-gray-200 group">
-                                <img src={url} alt={`Preview ${idx}`} className="w-full h-full object-cover" />
+                                <ImageWithPreview src={url} alt={`Preview ${idx}`} className="w-full h-full object-cover" />
                                 <button 
                                     type="button" 
                                     onClick={() => removeImage(idx)}

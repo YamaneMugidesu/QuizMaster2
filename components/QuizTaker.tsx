@@ -3,6 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { Question, QuestionType, QuizAttempt, QuizResult } from '../types';
 import { generateQuiz } from '../services/storageService';
 import { Button } from './Button';
+import { ImageWithPreview } from './ImageWithPreview';
+import { RichTextEditor } from './RichTextEditor';
 
 interface QuizTakerProps {
   configId: string;
@@ -300,11 +302,11 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
           {images.length > 0 && (
              <div className="mb-6 flex overflow-x-auto gap-4 pb-2">
                  {images.map((img, idx) => (
-                    <img 
-                        key={idx}
+                    <ImageWithPreview 
+                        key={idx} 
                         src={img} 
-                        alt={`Question Image ${idx}`} 
-                        className="max-h-64 object-contain rounded-lg border border-gray-200 shadow-sm flex-shrink-0"
+                        alt="Question Image" 
+                        className="h-48 w-auto object-contain rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-zoom-in"
                     />
                  ))}
              </div>

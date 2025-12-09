@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { QuizResult, QuizAttempt } from '../types';
 import { gradeQuizResult } from '../services/storageService';
 import { Button } from './Button';
+import { ImageWithPreview } from './ImageWithPreview';
 
 interface GradingModalProps {
   result: QuizResult;
@@ -93,7 +94,7 @@ export const GradingModal: React.FC<GradingModalProps> = ({ result, onClose, onC
                                 {attempt.questionImageUrls && attempt.questionImageUrls.length > 0 && (
                                     <div className="flex gap-2 mt-2">
                                         {attempt.questionImageUrls.map((url, i) => (
-                                            <img key={i} src={url} alt="题目配图" className="h-20 object-contain rounded border" />
+                                            <ImageWithPreview key={i} src={url} alt="题目配图" className="h-20 object-contain rounded border" />
                                         ))}
                                     </div>
                                 )}

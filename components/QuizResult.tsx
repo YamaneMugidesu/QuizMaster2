@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { QuizResult, Question, QuestionType, QuizConfig, QuizPartConfig } from '../types';
 import { getQuestions, getQuizConfig, gradeQuizResult } from '../services/storageService';
 import { Button } from './Button';
+import { ImageWithPreview } from './ImageWithPreview';
 
 interface QuizResultProps {
   result: QuizResult;
@@ -303,7 +304,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
                                      {questionImages.length > 0 && (
                                          <div className="mb-3 flex gap-2 overflow-x-auto">
                                              {questionImages.map((img, i) => (
-                                                <img key={i} src={img} alt="题图" className="h-24 object-contain rounded border border-gray-200" />
+                                                <ImageWithPreview key={i} src={img} alt="题图" className="h-24 object-contain rounded border border-gray-200" />
                                              ))}
                                          </div>
                                      )}
