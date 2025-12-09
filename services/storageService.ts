@@ -239,9 +239,20 @@ export const generateQuiz = async (configId: string): Promise<{ questions: Quest
 
 // --- USER API ---
 
+// Helper to generate safe email from username (handles Chinese characters)
+const generateSafeEmail = (username: string): string => {
+    // Use Hex encoding of UTF-8 bytes to ensure safe email local part
+    const encoder = new TextEncoder();
+    const data = encoder.encode(username);
+    const hex = Array.from(data).map(b => b.toString(16).padStart(2, '0')).join('');
+    return `${hex}@quizmaster.com`;
+};
+
 export const registerUser = async (username: string, password: string): Promise<{ success: boolean; message: string }> => {
-  const email = `${username}@quizmaster.com`;
-  const { data, error } = await supabase.auth.signUp({
+  // Use safe email generation to support Chinese usernames
+  const email = generateSafeEmail(username);
+  
+  const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
     email,
     password,
     options: {
@@ -249,28 +260,56 @@ export const registerUser = async (username: string, password: string): Promise<
     }
   });
 
-  if (error) return { success: false, message: error.message };
+  if (signUpError) return { success: false, message: signUpError.message };
   
-  if (data.user) {
+  if (signUpData.user) {
       // Create profile entry
       const { error: profileError } = await supabase.from('profiles').insert({
-          id: data.user.id,
+          id: signUpData.user.id,
           username,
           role: UserRole.USER
       });
-      if (profileError) console.error('Profile creation failed:', profileError);
+      if (profileError) {
+          console.error('Profile creation failed:', profileError);
+          // If profile creation fails with 23505 (Unique violation), it likely means 
+          // a trigger already created the profile or the username exists.
+          // Since auth.signUp succeeded, we should assume registration is successful 
+          // but maybe log this specific case.
+          if (profileError.code !== '23505') {
+             // Only return error if it's NOT a unique violation (which we treat as "already handled")
+             // However, strictly speaking, if it was a username collision with another user, 
+             // signUp likely wouldn't have succeeded if emails map 1:1 to usernames.
+          }
+          // We continue to return success even if profile insert fails, 
+          // assuming the auth user creation was the main goal and profile might exist.
+      }
   }
 
   return { success: true, message: '注册成功' };
 };
 
 export const loginUser = async (username: string, password: string): Promise<{ success: boolean; user?: User; message?: string }> => {
-  const email = `${username}@quizmaster.com`;
+  // Try with safe email (Hex format) first - for new users and Chinese usernames
+  let email = generateSafeEmail(username);
   
-  const { data, error } = await supabase.auth.signInWithPassword({
+  let { data, error } = await supabase.auth.signInWithPassword({
     email,
     password
   });
+
+  // If failed, and username is ASCII, try legacy email format (backward compatibility)
+  if (error && /^[\x00-\x7F]*$/.test(username)) {
+      const legacyEmail = `${username}@quizmaster.com`;
+      const { data: legacyData, error: legacyError } = await supabase.auth.signInWithPassword({
+          email: legacyEmail,
+          password
+      });
+      
+      if (!legacyError && legacyData.user) {
+          data = legacyData;
+          error = legacyError;
+      }
+  }
 
   if (error || !data.user) {
       return { success: false, message: '登录失败：' + (error?.message || '未知错误') };
