@@ -5,7 +5,7 @@ import { QuizResultView } from './components/QuizResult';
 import { UserDashboard } from './components/UserDashboard';
 import { User, UserRole, QuizResult } from './types';
 import { Button } from './components/Button';
-import { loginUser, registerUser, saveQuizResult } from './services/storageService';
+import { loginUser, registerUser, saveQuizResult, checkUserStatus } from './services/storageService';
 import { supabase } from './services/supabaseClient';
 import { ToastProvider, useToast } from './components/Toast';
 
@@ -17,6 +17,23 @@ const MainContent: React.FC = () => {
   const [activeConfigId, setActiveConfigId] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
   const { addToast } = useToast();
+
+  // Periodically check user status
+  useEffect(() => {
+    if (!user) return;
+
+    const checkStatus = async () => {
+      const isActive = await checkUserStatus(user.id);
+      if (!isActive) {
+        addToast('您的账号已被禁用或删除，即将退出登录', 'error');
+        handleLogout();
+      }
+    };
+
+    const intervalId = setInterval(checkStatus, 30000); // Check every 30 seconds
+
+    return () => clearInterval(intervalId);
+  }, [user]);
 
   // Restore Session
   useEffect(() => {
@@ -119,9 +136,22 @@ const MainContent: React.FC = () => {
         timestamp: Date.now()
     };
     
-    await saveQuizResult(fullResult);
-    setCurrentResult(fullResult);
-    setView('result');
+    try {
+        await saveQuizResult(fullResult);
+        setCurrentResult(fullResult);
+        setView('result');
+    } catch (error: any) {
+        console.error('Failed to save result:', error);
+        if (error.message?.includes('deactivated or deleted')) {
+            addToast('您的账号已被禁用或删除，无法保存记录', 'error');
+            handleLogout();
+        } else {
+            addToast('保存成绩失败，请重试', 'error');
+            // Still show result? Maybe not if it failed to save.
+            // But for user experience, maybe show it but warn?
+            // Let's just return to dashboard or show error.
+        }
+    }
   };
 
   const handleViewHistoryResult = (result: QuizResult) => {

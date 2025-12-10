@@ -78,7 +78,8 @@ export const getQuestions = async (
   // Construct Query
   let query = supabase
     .from('questions')
-    .select('*', { count: 'exact' });
+    .select('*', { count: 'exact' })
+    .neq('is_deleted', true);
 
   // Apply Filters
   if (filters.search) {
@@ -183,7 +184,8 @@ export const toggleQuestionVisibility = async (id: string): Promise<void> => {
 
 export const deleteQuestion = async (id: string): Promise<void> => {
   questionsCache = null; // Invalidate cache
-  const { error } = await supabase.from('questions').delete().eq('id', id);
+  // Soft delete
+  const { error } = await supabase.from('questions').update({ is_deleted: true }).eq('id', id);
   if (error) console.error('Error deleting question:', error);
 };
 
@@ -195,7 +197,7 @@ export const getQuizConfigs = async (): Promise<QuizConfig[]> => {
     return quizConfigsCache.data;
   }
 
-  const { data, error } = await supabase.from('quiz_configs').select('*');
+  const { data, error } = await supabase.from('quiz_configs').select('*').neq('is_deleted', true);
   if (error) {
     console.error('Error fetching configs:', error);
     return [];
@@ -241,7 +243,8 @@ export const saveQuizConfig = async (config: QuizConfig): Promise<void> => {
 
 export const deleteQuizConfig = async (id: string): Promise<void> => {
     quizConfigsCache = null; // Invalidate cache
-    await supabase.from('quiz_configs').delete().eq('id', id);
+    // Soft delete
+    await supabase.from('quiz_configs').update({ is_deleted: true }).eq('id', id);
 }
 
 export const toggleQuizConfigVisibility = async (id: string): Promise<void> => {
@@ -259,7 +262,7 @@ export const getAvailableQuestionCount = async (
     types: QuestionType[] = [],
     categories: QuestionCategory[] = []
 ): Promise<number> => {
-    let query = supabase.from('questions').select('id', { count: 'exact', head: true }).eq('is_disabled', false);
+    let query = supabase.from('questions').select('id', { count: 'exact', head: true }).eq('is_disabled', false).neq('is_deleted', true);
 
     if (subjects.length > 0) query = query.in('subject', subjects);
     if (difficulties.length > 0) query = query.in('difficulty', difficulties);
@@ -282,7 +285,7 @@ export const generateQuiz = async (configId: string): Promise<{ questions: Quest
     let allQuestions: Question[] = [];
 
     for (const part of mappedConfig.parts) {
-        let query = supabase.from('questions').select('*').eq('is_disabled', false);
+        let query = supabase.from('questions').select('*').eq('is_disabled', false).neq('is_deleted', true);
         
         if (part.subjects && part.subjects.length > 0) query = query.in('subject', part.subjects);
         if (part.difficulties && part.difficulties.length > 0) query = query.in('difficulty', part.difficulties);
@@ -487,6 +490,7 @@ export const loginUser = async (username: string, password: string): Promise<{ s
   }
 
   if (error || !data.user) {
+      console.error('Login error details:', error);
       return { success: false, message: '登录失败：' + (error?.message || '未知错误') };
   }
 
@@ -497,23 +501,50 @@ export const loginUser = async (username: string, password: string): Promise<{ s
       return { success: false, message: '用户档案不存在' };
   }
 
+  // Check Active Status
+  if (profile.is_active === false) { // Default to true if null/undefined
+      await supabase.auth.signOut();
+      return { success: false, message: '您的账户已被停用，请联系管理员开通' };
+  }
+
   return {
       success: true,
       user: {
           id: profile.id,
           username: profile.username,
           role: profile.role as UserRole,
-          createdAt: profile.created_at
+          createdAt: profile.created_at,
+          isActive: profile.is_active
       }
   };
 };
 
 export const adminAddUser = async (username: string, password: string, role: UserRole): Promise<{ success: boolean; message: string }> => {
-    return { success: false, message: "请直接在前台使用注册功能" };
+    // Call the RPC function admin_create_user to create user without logging out
+    const { data, error } = await supabase.rpc('admin_create_user', {
+        new_username: username,
+        new_password: password,
+        new_role: role
+    });
+
+    if (error) {
+        console.error('Error creating user via admin RPC:', error);
+        return { success: false, message: '创建失败: ' + error.message };
+    }
+
+    // RPC returns a JSON object with success and message
+    if (data && data.success) {
+        return { success: true, message: '用户创建成功' };
+    } else {
+        return { success: false, message: data?.message || '创建失败，未知错误' };
+    }
 };
 
 export const deleteUser = async (userId: string): Promise<{ success: boolean; error?: any }> => {
-    const { error } = await supabase.from('profiles').delete().eq('id', userId);
+    // Soft delete: Mark the user as deleted instead of removing from DB
+    // This preserves the referential integrity for quiz results
+    const { error } = await supabase.from('profiles').update({ is_deleted: true }).eq('id', userId);
+    
     if (error) {
         console.error('Error deleting user:', error);
         return { success: false, error };
@@ -531,13 +562,14 @@ export const updateUserRole = async (userId: string, newRole: UserRole): Promise
 };
 
 export const getAllUsers = async (): Promise<User[]> => {
-  const { data, error } = await supabase.from('profiles').select('*');
+  const { data, error } = await supabase.from('profiles').select('*').neq('is_deleted', true);
   if (error) return [];
   return data.map((p: any) => ({
     id: p.id,
     username: p.username,
     role: p.role as UserRole,
-    createdAt: p.created_at
+    createdAt: p.created_at,
+    isActive: p.is_active
   }));
 };
 
@@ -548,6 +580,7 @@ export const getPaginatedUsers = async (page: number, limit: number): Promise<{ 
     const { data, count, error } = await supabase
         .from('profiles')
         .select('*', { count: 'exact' })
+        .neq('is_deleted', true)
         .order('created_at', { ascending: false })
         .range(from, to);
 
@@ -560,34 +593,102 @@ export const getPaginatedUsers = async (page: number, limit: number): Promise<{ 
         id: p.id,
         username: p.username,
         role: p.role as UserRole,
-        createdAt: p.created_at
+        createdAt: p.created_at,
+        isActive: p.is_active
     }));
 
     return { data: mapped, total: count || 0 };
 };
 
+export const updateUserProfile = async (userId: string, updates: { username?: string; role?: UserRole; isActive?: boolean; password?: string }): Promise<{ success: boolean; error?: any }> => {
+    const dbUpdates: any = {};
+    if (updates.username !== undefined) dbUpdates.username = updates.username;
+    if (updates.role !== undefined) dbUpdates.role = updates.role;
+    if (updates.isActive !== undefined) dbUpdates.is_active = updates.isActive;
+
+    // Update profile data
+    const { error: profileError } = await supabase.from('profiles').update(dbUpdates).eq('id', userId);
+    
+    if (profileError) {
+        console.error('Error updating user profile:', profileError);
+        return { success: false, error: profileError };
+    }
+
+    // Update password if provided
+    if (updates.password && updates.password.trim() !== '') {
+        const { error: passwordError } = await supabase.rpc('admin_update_user_password', {
+            target_user_id: userId,
+            new_password: updates.password
+        });
+
+        if (passwordError) {
+            console.error('Error updating user password:', passwordError);
+            // Return success but with password error? Or fail?
+            // Better to return failure or partial success. 
+            // For simplicity, we return the error.
+            return { success: false, error: passwordError };
+        }
+    }
+
+    return { success: true };
+};
+
 // --- RESULTS HISTORY ---
 
+export const checkUserStatus = async (userId: string): Promise<boolean> => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('is_deleted, is_active')
+    .eq('id', userId)
+    .single();
+
+  if (error || !data) {
+    return false;
+  }
+
+  // User is valid if NOT deleted AND IS active
+  return !data.is_deleted && (data.is_active !== false); // Default to true if null
+};
+
 export const saveQuizResult = async (result: QuizResult): Promise<void> => {
-  resultsCache.clear(); // Invalidate results cache
-  const dbPayload = {
-      user_id: result.userId,
-      username: result.username,
-      timestamp: result.timestamp,
-      score: result.score,
-      max_score: result.maxScore,
-      passing_score: result.passingScore,
-      is_passed: result.isPassed,
-      total_questions: result.totalQuestions,
-      attempts: result.attempts,
-      config_id: result.configId,
-      config_name: result.configName,
-      status: result.status || 'completed',
-      duration: result.duration
-  };
+  // Check if user is still active before saving
+  const isActive = await checkUserStatus(result.userId);
+  if (!isActive) {
+    throw new Error('User account is deactivated or deleted. Cannot save result.');
+  }
+
+  const { error } = await supabase.from('quiz_results').insert([{
+    user_id: result.userId,
+    username: result.username,
+    score: result.score,
+    max_score: result.maxScore,
+    passing_score: result.passingScore,
+    is_passed: result.isPassed,
+    total_questions: result.totalQuestions,
+    attempts: result.attempts,
+    config_id: result.configId,
+    config_name: result.configName,
+    timestamp: result.timestamp,
+    status: result.status || 'completed',
+    duration: result.duration
+  }]);
+
+  if (error) {
+    console.error('Error saving quiz result:', error);
+    throw error;
+  }
   
-  const { error } = await supabase.from('quiz_results').insert(dbPayload);
-  if (error) console.error('Error saving result:', error);
+  // Invalidate cache
+  resultsCache.clear();
+};
+
+export const deleteQuizResult = async (id: string): Promise<void> => {
+    resultsCache.clear(); // Invalidate cache
+    const { error } = await supabase.from('quiz_results').delete().eq('id', id);
+    if (error) {
+        console.error('Error deleting quiz result:', error);
+        throw error;
+    }
 };
 
 export const getUserResults = async (userId: string): Promise<QuizResult[]> => {

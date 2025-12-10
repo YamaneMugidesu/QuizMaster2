@@ -1,16 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
-import { getPaginatedUsers, adminAddUser, deleteUser, updateUserRole } from '../services/storageService';
+import { getPaginatedUsers, adminAddUser, deleteUser, updateUserRole, updateUserProfile } from '../services/storageService';
 import { Button } from './Button';
 import { useToast } from './Toast';
 
 // Define the types of actions that require confirmation
-type ActionType = 'DELETE' | 'CHANGE_ROLE';
+type ActionType = 'DELETE' | 'CHANGE_ROLE' | 'TOGGLE_STATUS';
 
 interface PendingAction {
   type: ActionType;
   user: User;
   newRole?: UserRole; // Only for CHANGE_ROLE
+  newStatus?: boolean; // Only for TOGGLE_STATUS
+}
+
+interface EditUserForm {
+  id: string;
+  username: string;
+  password?: string; // Optional, only if changing
+  role: UserRole;
+  isActive: boolean;
 }
 
 export const UserManagement: React.FC = () => {
@@ -28,6 +37,9 @@ export const UserManagement: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>(UserRole.USER);
   const [isAdding, setIsAdding] = useState(false);
+
+  // Edit User Form State
+  const [editingUser, setEditingUser] = useState<EditUserForm | null>(null);
 
   // Modal State for Confirmation
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
@@ -61,7 +73,6 @@ export const UserManagement: React.FC = () => {
     }
   };
 
-
   // Triggered when "Delete" button is clicked
   const initiateDelete = (user: User) => {
     setPendingAction({
@@ -79,6 +90,53 @@ export const UserManagement: React.FC = () => {
       newRole
     });
   };
+
+  // Triggered when Active Switch is toggled
+  const initiateStatusToggle = (user: User) => {
+    const currentStatus = user.isActive !== false; // Default true
+    setPendingAction({
+      type: 'TOGGLE_STATUS',
+      user,
+      newStatus: !currentStatus
+    });
+  };
+
+  // Open Edit Modal
+  const initiateEdit = (user: User) => {
+    setEditingUser({
+      id: user.id,
+      username: user.username,
+      password: '', // Empty means don't change
+      role: user.role,
+      isActive: user.isActive !== false
+    });
+  };
+
+  // Save Edit User
+  const handleSaveEdit = async () => {
+    if (!editingUser) return;
+
+    const updates: any = {
+      username: editingUser.username,
+      role: editingUser.role,
+      isActive: editingUser.isActive
+    };
+    
+    if (editingUser.password && editingUser.password.trim() !== '') {
+        updates.password = editingUser.password;
+    }
+    
+    const { success, error } = await updateUserProfile(editingUser.id, updates);
+    
+    if (success) {
+        addToast(`用户 ${editingUser.username} 信息已更新`, 'success');
+        setEditingUser(null);
+        await loadUsers();
+    } else {
+        addToast(`更新失败: ${error?.message || '未知错误'}`, 'error');
+    }
+  };
+
 
   // Execute the pending action
   const confirmAction = async () => {
@@ -99,6 +157,14 @@ export const UserManagement: React.FC = () => {
           await loadUsers();
       } else {
           addToast(`权限更新失败: ${error?.message || '未知错误'}`, 'error');
+      }
+    } else if (pendingAction.type === 'TOGGLE_STATUS' && pendingAction.newStatus !== undefined) {
+      const { success, error } = await updateUserProfile(pendingAction.user.id, { isActive: pendingAction.newStatus });
+      if (success) {
+          addToast(`用户 ${pendingAction.user.username} 状态已更新`, 'success');
+          await loadUsers();
+      } else {
+          addToast(`状态更新失败: ${error?.message || '未知错误'}`, 'error');
       }
     }
     
@@ -178,6 +244,7 @@ export const UserManagement: React.FC = () => {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">用户名</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">角色权限</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">注册时间</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
                 </tr>
@@ -185,7 +252,7 @@ export const UserManagement: React.FC = () => {
               <tbody className="bg-white divide-y divide-gray-200">
                 {users.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-4 text-center text-sm text-gray-500">
+                    <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500">
                       暂无其他用户
                     </td>
                   </tr>
@@ -210,10 +277,36 @@ export const UserManagement: React.FC = () => {
                              <option value={UserRole.SUPER_ADMIN}>超级管理员</option>
                          </select>
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <div className="flex items-center">
+                            <button 
+                                onClick={() => initiateStatusToggle(u)}
+                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                    u.isActive !== false ? 'bg-green-500' : 'bg-gray-200'
+                                }`}
+                            >
+                                <span
+                                    aria-hidden="true"
+                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                        u.isActive !== false ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                                />
+                            </button>
+                            <span className="ml-2 text-xs text-gray-500">
+                                {u.isActive !== false ? '正常' : '禁用'}
+                            </span>
+                        </div>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {new Date(u.createdAt).toLocaleDateString('zh-CN')}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
+                        <button 
+                           onClick={() => initiateEdit(u)}
+                           className="text-primary-600 hover:text-primary-900 transition-colors"
+                        >
+                           编辑
+                        </button>
                         <button 
                            onClick={() => initiateDelete(u)}
                            className="text-red-600 hover:text-red-900 transition-colors"
@@ -254,12 +347,88 @@ export const UserManagement: React.FC = () => {
         )}
       </div>
 
+      {/* Edit User Modal */}
+      {editingUser && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 transform transition-all scale-100">
+                <h3 className="text-xl font-bold text-gray-900 mb-6">编辑用户</h3>
+                
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">用户名</label>
+                        <input 
+                            type="text" 
+                            className="w-full px-3 py-2 border rounded-md text-sm"
+                            value={editingUser.username}
+                            onChange={(e) => setEditingUser({...editingUser, username: e.target.value})}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            新密码 <span className="text-gray-400 font-normal">(留空则不修改)</span>
+                        </label>
+                        <input 
+                            type="text" 
+                            className="w-full px-3 py-2 border rounded-md text-sm"
+                            placeholder="输入新密码以重置"
+                            value={editingUser.password}
+                            onChange={(e) => setEditingUser({...editingUser, password: e.target.value})}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">权限角色</label>
+                        <select 
+                            className="w-full px-3 py-2 border rounded-md text-sm bg-white"
+                            value={editingUser.role}
+                            onChange={(e) => setEditingUser({...editingUser, role: e.target.value as UserRole})}
+                        >
+                            <option value={UserRole.USER}>普通用户</option>
+                            <option value={UserRole.ADMIN}>普通管理员</option>
+                            <option value={UserRole.SUPER_ADMIN}>超级管理员</option>
+                        </select>
+                    </div>
+                    <div>
+                         <label className="block text-sm font-medium text-gray-700 mb-1">账号状态</label>
+                         <div className="flex items-center mt-2">
+                            <button 
+                                onClick={() => setEditingUser({...editingUser, isActive: !editingUser.isActive})}
+                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                    editingUser.isActive ? 'bg-green-500' : 'bg-gray-200'
+                                }`}
+                            >
+                                <span
+                                    aria-hidden="true"
+                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                        editingUser.isActive ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                                />
+                            </button>
+                            <span className="ml-2 text-sm text-gray-600">
+                                {editingUser.isActive ? '正常启用' : '已禁用'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex justify-end gap-3 mt-8">
+                    <Button variant="secondary" onClick={() => setEditingUser(null)}>
+                        取消
+                    </Button>
+                    <Button variant="primary" onClick={handleSaveEdit}>
+                        保存修改
+                    </Button>
+                </div>
+            </div>
+        </div>
+      )}
+
       {/* Confirmation Modal */}
       {pendingAction && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={(e) => e.stopPropagation()}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 transform transition-all scale-100">
                 <h3 className="text-xl font-bold text-gray-900 mb-2">
-                    {pendingAction.type === 'DELETE' ? '删除用户确认' : '修改权限确认'}
+                    {pendingAction.type === 'DELETE' ? '删除用户确认' : 
+                     pendingAction.type === 'TOGGLE_STATUS' ? '修改状态确认' : '修改权限确认'}
                 </h3>
                 
                 <div className="text-gray-600 mb-6">
@@ -267,6 +436,14 @@ export const UserManagement: React.FC = () => {
                         <p>
                             您确定要删除用户 <span className="font-bold text-gray-800">{pendingAction.user.username}</span> 吗？
                             <br/><span className="text-sm text-red-500">此操作无法撤销。</span>
+                        </p>
+                    ) : pendingAction.type === 'TOGGLE_STATUS' ? (
+                        <p>
+                            您确定要将用户 <span className="font-bold text-gray-800">{pendingAction.user.username}</span> 的状态修改为
+                            <span className={`font-bold mx-1 ${pendingAction.newStatus ? 'text-green-600' : 'text-red-600'}`}>
+                                {pendingAction.newStatus ? '正常' : '禁用'}
+                            </span>
+                            吗？
                         </p>
                     ) : (
                         <p>

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Question, QuestionType, Difficulty, GradeLevel, QuestionFormData, UserRole, QuizResult, User, SUBJECTS, QuizConfig, QuestionCategory } from '../types';
-import { saveQuestion, getQuestions, updateQuestion, deleteQuestion, toggleQuestionVisibility, getAllUserResults, getPaginatedUserResults, getQuizConfigs, clearQuestionsCache, clearResultsCache } from '../services/storageService';
+import { saveQuestion, getQuestions, updateQuestion, deleteQuestion, toggleQuestionVisibility, getAllUserResults, getPaginatedUserResults, getQuizConfigs, clearQuestionsCache, clearResultsCache, deleteQuizResult } from '../services/storageService';
 import { Button } from './Button';
 import { QuestionForm } from './QuestionForm';
 import { UserManagement } from './UserManagement';
@@ -44,6 +44,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   
   // Delete Confirmation Modal State
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
+  const [recordToDelete, setRecordToDelete] = useState<string | null>(null);
 
   // Grading Modal State
   const [gradingResult, setGradingResult] = useState<QuizResult | null>(null);
@@ -228,8 +229,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
     }
   };
   
-  const getDifficultyColor = (d: Difficulty) => {
-      switch(d) {
+  const confirmDeleteRecord = async () => {
+      if (recordToDelete) {
+          try {
+              await deleteQuizResult(recordToDelete);
+              // Refresh records
+              clearResultsCache();
+              loadData(); // This might be too broad, maybe separate loadRecords?
+              // Manually refresh records logic here since loadData is effect based
+              if (activeTab === 'records') {
+                  setIsLoading(true);
+                  const { data, total } = await getPaginatedUserResults(currentPage, itemsPerPage, userSearchTerm);
+                  setUserResults(data);
+                  setTotalUserResults(total);
+                  setIsLoading(false);
+              }
+          } catch (error) {
+              console.error('Failed to delete record:', error);
+              alert('删除记录失败');
+          }
+          setRecordToDelete(null);
+      }
+  };
+
+  const getDifficultyColor = (diff: Difficulty) => {
+      switch(diff) {
           case Difficulty.EASY: return 'bg-green-100 text-green-800';
           case Difficulty.MEDIUM: return 'bg-yellow-100 text-yellow-800';
           case Difficulty.HARD: return 'bg-red-100 text-red-800';
@@ -709,19 +733,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                                   )}
                               </td>
                               <td className="px-6 py-4 text-sm text-primary-600 font-medium">
-                                 {result.status === 'pending_grading' ? (
-                                     <button 
-                                         onClick={(e) => { e.stopPropagation(); setGradingResult(result); }}
-                                         className="text-orange-600 hover:text-orange-800 font-bold border border-orange-200 bg-orange-50 px-3 py-1 rounded-md"
+                                 <div className="flex items-center gap-2">
+                                     {result.status === 'pending_grading' ? (
+                                         <button 
+                                             onClick={(e) => { e.stopPropagation(); setGradingResult(result); }}
+                                             className="text-orange-600 hover:text-orange-800 font-bold border border-orange-200 bg-orange-50 px-3 py-1 rounded-md text-xs"
+                                         >
+                                             去批改
+                                         </button>
+                                     ) : (
+                                         <span onClick={() => {
+                                             const config = quizConfigs.find(c => c.id === result.configId);
+                                             onViewResult({ ...result, config });
+                                         }} className="cursor-pointer hover:underline">查看详情</span>
+                                     )}
+                                     <button
+                                         onClick={(e) => { e.stopPropagation(); setRecordToDelete(result.id); }}
+                                         className="text-gray-400 hover:text-red-500 p-1"
+                                         title="删除记录"
                                      >
-                                         去批改
+                                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                         </svg>
                                      </button>
-                                 ) : (
-                                     <span onClick={() => {
-                                         const config = quizConfigs.find(c => c.id === result.configId);
-                                         onViewResult({ ...result, config });
-                                     }} className="cursor-pointer hover:underline">查看详情 &rarr;</span>
-                                 )}
+                                 </div>
                               </td>
                             </tr>
                             {/* Second line for Part Scores */}
@@ -806,7 +841,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Confirmation Modal (Question) */}
       {questionToDelete && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={(e) => e.stopPropagation()}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
@@ -815,6 +850,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                 <div className="flex justify-end gap-3">
                     <Button variant="secondary" onClick={() => setQuestionToDelete(null)}>取消</Button>
                     <Button variant="danger" onClick={confirmDelete}>确认删除</Button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal (Record) */}
+      {recordToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+                <h3 className="text-xl font-bold text-gray-900 mb-2">确认删除记录</h3>
+                <p className="text-gray-500 mb-6">您确定要删除这条答题记录吗？删除后无法恢复。</p>
+                <div className="flex justify-end gap-3">
+                    <Button variant="secondary" onClick={() => setRecordToDelete(null)}>取消</Button>
+                    <Button variant="danger" onClick={confirmDeleteRecord}>确认删除</Button>
                 </div>
             </div>
         </div>

@@ -69,6 +69,7 @@ export interface User {
   password?: string;
   role: UserRole;
   createdAt: number;
+  isActive?: boolean; // New field for user status (true: active, false: suspended)
 }
 
 export interface QuizResult {
