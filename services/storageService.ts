@@ -465,12 +465,22 @@ export const adminAddUser = async (username: string, password: string, role: Use
     return { success: false, message: "请直接在前台使用注册功能" };
 };
 
-export const deleteUser = async (userId: string): Promise<void> => {
-    await supabase.from('profiles').delete().eq('id', userId);
+export const deleteUser = async (userId: string): Promise<{ success: boolean; error?: any }> => {
+    const { error } = await supabase.from('profiles').delete().eq('id', userId);
+    if (error) {
+        console.error('Error deleting user:', error);
+        return { success: false, error };
+    }
+    return { success: true };
 };
 
-export const updateUserRole = async (userId: string, newRole: UserRole): Promise<void> => {
-    await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
+export const updateUserRole = async (userId: string, newRole: UserRole): Promise<{ success: boolean; error?: any }> => {
+    const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
+    if (error) {
+        console.error('Error updating user role:', error);
+        return { success: false, error };
+    }
+    return { success: true };
 };
 
 export const getAllUsers = async (): Promise<User[]> => {

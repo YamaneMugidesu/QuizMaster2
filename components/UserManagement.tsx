@@ -78,11 +78,21 @@ export const UserManagement: React.FC = () => {
     if (!pendingAction) return;
 
     if (pendingAction.type === 'DELETE') {
-      await deleteUser(pendingAction.user.id);
-      await loadUsers();
+      const { success, error } = await deleteUser(pendingAction.user.id);
+      if (success) {
+          addToast(`用户 ${pendingAction.user.username} 已被删除`, 'success');
+          await loadUsers();
+      } else {
+          addToast(`删除用户失败: ${error?.message || '未知错误'}`, 'error');
+      }
     } else if (pendingAction.type === 'CHANGE_ROLE' && pendingAction.newRole) {
-      await updateUserRole(pendingAction.user.id, pendingAction.newRole);
-      await loadUsers();
+      const { success, error } = await updateUserRole(pendingAction.user.id, pendingAction.newRole);
+      if (success) {
+          addToast(`用户 ${pendingAction.user.username} 权限已更新`, 'success');
+          await loadUsers();
+      } else {
+          addToast(`权限更新失败: ${error?.message || '未知错误'}`, 'error');
+      }
     }
     
     setPendingAction(null);
