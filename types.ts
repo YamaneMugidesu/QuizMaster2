@@ -132,4 +132,5 @@ export interface QuizConfig {
   totalQuestions: number; // Calculated automatically
   createdAt: number;
   quizMode?: 'practice' | 'exam'; // 'practice': show details, 'exam': hide details (unless admin)
+  isPublished?: boolean; // Whether the quiz is available to regular users
 }

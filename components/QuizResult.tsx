@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { QuizResult, Question, QuestionType, QuizConfig, QuizPartConfig } from '../types';
-import { getQuestions, getQuizConfig, gradeQuizResult } from '../services/storageService';
+import { getQuizConfig, gradeQuizResult, getAllQuestionsRaw } from '../services/storageService';
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
 import { useToast } from './Toast';
@@ -25,7 +25,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
   useEffect(() => {
       const load = async () => {
           // We need to know if questions are deleted, and to get explanations if not in snapshot
-          const questions = await getQuestions();
+          const questions = await getAllQuestionsRaw();
           setAllQuestions(questions);
 
           if (!config && result.configId) {

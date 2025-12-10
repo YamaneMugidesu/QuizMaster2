@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
-import { getAllUsers, adminAddUser, deleteUser, updateUserRole } from '../services/storageService';
+import { getPaginatedUsers, adminAddUser, deleteUser, updateUserRole } from '../services/storageService';
 import { Button } from './Button';
 import { useToast } from './Toast';
 
@@ -15,8 +15,13 @@ interface PendingAction {
 
 export const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
+  const [totalUsers, setTotalUsers] = useState(0);
   const [loading, setLoading] = useState(true);
   const { addToast } = useToast();
+  
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   
   // New User Form State
   const [newUsername, setNewUsername] = useState('');
@@ -29,12 +34,13 @@ export const UserManagement: React.FC = () => {
 
   useEffect(() => {
     loadUsers();
-  }, []);
+  }, [currentPage]);
 
   const loadUsers = async () => {
     setLoading(true);
-    const data = await getAllUsers();
+    const { data, total } = await getPaginatedUsers(currentPage, itemsPerPage);
     setUsers(data);
+    setTotalUsers(total);
     setLoading(false);
   };
 
@@ -54,6 +60,7 @@ export const UserManagement: React.FC = () => {
       addToast(result.message, 'error');
     }
   };
+
 
   // Triggered when "Delete" button is clicked
   const initiateDelete = (user: User) => {
@@ -220,6 +227,31 @@ export const UserManagement: React.FC = () => {
               </tbody>
             </table>
         </div>
+
+        {/* Pagination Controls */}
+        {totalUsers > itemsPerPage && (
+            <div className="flex justify-center items-center mt-4 gap-2">
+                <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                >
+                    上一页
+                </Button>
+                <span className="text-sm text-gray-600">
+                    第 {currentPage} 页 / 共 {Math.ceil(totalUsers / itemsPerPage)} 页
+                </span>
+                <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    disabled={currentPage === Math.ceil(totalUsers / itemsPerPage)}
+                    onClick={() => setCurrentPage(prev => Math.min(Math.ceil(totalUsers / itemsPerPage), prev + 1))}
+                >
+                    下一页
+                </Button>
+            </div>
+        )}
       </div>
 
       {/* Confirmation Modal */}

@@ -29,7 +29,8 @@ const mapConfigFromDB = (c: any): QuizConfig => ({
   parts: c.parts || [],
   totalQuestions: c.total_questions,
   createdAt: c.created_at,
-  quizMode: c.quiz_mode || 'practice'
+  quizMode: c.quiz_mode || 'practice',
+  isPublished: c.is_published
 });
 
 const mapResultFromDB = (r: any): QuizResult => ({
@@ -61,26 +62,63 @@ export const clearResultsCache = () => { resultsCache.clear(); };
 
 // --- QUESTIONS API ---
 
-export const getQuestions = async (): Promise<Question[]> => {
-  // Check cache
-  if (questionsCache && (Date.now() - questionsCache.timestamp < CACHE_TTL)) {
-    return questionsCache.data;
+export interface QuestionFilters {
+    search?: string;
+    subject?: string;
+    gradeLevel?: GradeLevel;
+    type?: QuestionType;
+    difficulty?: Difficulty;
+}
+
+export const getQuestions = async (
+    page: number = 1, 
+    limit: number = 10, 
+    filters: QuestionFilters = {}
+): Promise<{ data: Question[]; total: number }> => {
+  // Construct Query
+  let query = supabase
+    .from('questions')
+    .select('*', { count: 'exact' });
+
+  // Apply Filters
+  if (filters.search) {
+      query = query.ilike('text', `%${filters.search}%`);
+  }
+  if (filters.subject) {
+      query = query.eq('subject', filters.subject);
+  }
+  if (filters.gradeLevel) {
+      query = query.eq('grade_level', filters.gradeLevel);
+  }
+  if (filters.type) {
+      query = query.eq('type', filters.type);
+  }
+  if (filters.difficulty) {
+      query = query.eq('difficulty', filters.difficulty);
   }
 
-  const { data, error } = await supabase
-    .from('questions')
-    .select('*')
-    .order('created_at', { ascending: false });
+  // Pagination
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+  
+  const { data, count, error } = await query
+    .order('created_at', { ascending: false })
+    .range(from, to);
   
   if (error) {
     console.error('Error fetching questions:', error);
-    return [];
+    return { data: [], total: 0 };
   }
   
   const mapped = data.map(mapQuestionFromDB);
-  // Update cache
-  questionsCache = { data: mapped, timestamp: Date.now() };
-  return mapped;
+  return { data: mapped, total: count || 0 };
+};
+
+// Legacy support for getting all questions (if needed by other components, though we should migrate)
+export const getAllQuestionsRaw = async (): Promise<Question[]> => {
+    const { data, error } = await supabase.from('questions').select('*').order('created_at', { ascending: false });
+    if (error) return [];
+    return data.map(mapQuestionFromDB);
 };
 
 export const saveQuestion = async (question: Question): Promise<void> => {
@@ -188,7 +226,8 @@ export const saveQuizConfig = async (config: QuizConfig): Promise<void> => {
     parts: rest.parts,
     total_questions: rest.totalQuestions,
     created_at: rest.createdAt,
-    quiz_mode: rest.quizMode || 'practice'
+    quiz_mode: rest.quizMode || 'practice',
+    is_published: rest.isPublished
   };
 
   if (id && id.length > 20) {
@@ -204,6 +243,14 @@ export const deleteQuizConfig = async (id: string): Promise<void> => {
     quizConfigsCache = null; // Invalidate cache
     await supabase.from('quiz_configs').delete().eq('id', id);
 }
+
+export const toggleQuizConfigVisibility = async (id: string): Promise<void> => {
+    quizConfigsCache = null;
+    const { data } = await supabase.from('quiz_configs').select('is_published').eq('id', id).single();
+    if (data) {
+        await supabase.from('quiz_configs').update({ is_published: !data.is_published }).eq('id', id);
+    }
+};
 
 export const getAvailableQuestionCount = async (
     subjects: string[], 
@@ -492,6 +539,31 @@ export const getAllUsers = async (): Promise<User[]> => {
     role: p.role as UserRole,
     createdAt: p.created_at
   }));
+};
+
+export const getPaginatedUsers = async (page: number, limit: number): Promise<{ data: User[]; total: number }> => {
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    const { data, count, error } = await supabase
+        .from('profiles')
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+    if (error) {
+        console.error('Error fetching users:', error);
+        return { data: [], total: 0 };
+    }
+
+    const mapped = (data || []).map((p: any) => ({
+        id: p.id,
+        username: p.username,
+        role: p.role as UserRole,
+        createdAt: p.created_at
+    }));
+
+    return { data: mapped, total: count || 0 };
 };
 
 // --- RESULTS HISTORY ---

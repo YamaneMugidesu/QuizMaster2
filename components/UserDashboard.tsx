@@ -4,6 +4,8 @@ import { QuizResult, User, QuizConfig } from '../types';
 import { getUserResults, getQuizConfigs, getPaginatedUserResultsByUserId } from '../services/storageService';
 import { Button } from './Button';
 
+import { UserRole } from '../types';
+
 interface UserDashboardProps {
   user: User;
   onStartQuiz: (configId?: string) => void;
@@ -28,11 +30,16 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onStartQuiz,
   useEffect(() => {
     const fetchConfigs = async () => {
         const loadedConfigs = await getQuizConfigs();
-        setConfigs(loadedConfigs);
+        // Only show published configs to non-admin users
+        if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+            setConfigs(loadedConfigs.filter(c => c.isPublished));
+        } else {
+            setConfigs(loadedConfigs);
+        }
         setIsInitialLoading(false);
     };
     fetchConfigs();
-  }, []);
+  }, [user.role]);
 
   // History Data Load (Pagination)
   useEffect(() => {

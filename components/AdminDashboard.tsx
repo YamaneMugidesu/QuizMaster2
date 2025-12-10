@@ -16,6 +16,7 @@ interface AdminDashboardProps {
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onViewResult }) => {
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [totalQuestions, setTotalQuestions] = useState(0);
   const [userResults, setUserResults] = useState<QuizResult[]>([]);
   const [totalUserResults, setTotalUserResults] = useState(0);
   const [quizConfigs, setQuizConfigs] = useState<QuizConfig[]>([]);
@@ -51,13 +52,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
     loadData();
   }, [activeTab]);
 
+  // Fetch Questions when pagination or filters change
+  useEffect(() => {
+      if (activeTab === 'list') {
+          const fetchQuestions = async () => {
+              setIsLoading(true);
+              const { data, total } = await getQuestions(currentQuestionPage, questionsPerPage, {
+                  search: searchTerm,
+                  subject: filterSubject,
+                  gradeLevel: filterGrade as GradeLevel,
+                  type: filterType as QuestionType,
+                  difficulty: filterDifficulty as Difficulty
+              });
+              setQuestions(data);
+              setTotalQuestions(total);
+              setIsLoading(false);
+          };
+          
+          const timer = setTimeout(() => {
+              fetchQuestions();
+          }, 300); // Debounce search
+          
+          return () => clearTimeout(timer);
+      }
+  }, [activeTab, currentQuestionPage, searchTerm, filterSubject, filterGrade, filterType, filterDifficulty]);
+
   const loadData = async () => {
-    // Only load questions if we are in list mode
+    // Only load questions if we are in list mode - Handled by effect above
     if (activeTab === 'list') {
-        setIsLoading(true);
-        const loadedQuestions = await getQuestions();
-        setQuestions(loadedQuestions.sort((a, b) => b.createdAt - a.createdAt));
-        setIsLoading(false);
+        // Initial load or tab switch triggers the effect
     }
     
     if (activeTab === 'records') {
@@ -73,7 +96,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       setIsLoading(true);
       if (activeTab === 'list') {
           clearQuestionsCache();
-          await loadData();
+          // Trigger re-fetch
+          const { data, total } = await getQuestions(currentQuestionPage, questionsPerPage, {
+                search: searchTerm,
+                subject: filterSubject,
+                gradeLevel: filterGrade as GradeLevel,
+                type: filterType as QuestionType,
+                difficulty: filterDifficulty as Difficulty
+          });
+          setQuestions(data);
+          setTotalQuestions(total);
       } else if (activeTab === 'records') {
           clearResultsCache();
           // Trigger re-fetch via effect or direct call
@@ -174,7 +206,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
     e.preventDefault();
     e.stopPropagation();
     await toggleQuestionVisibility(id);
-    loadData();
+    refreshData();
   };
 
   const resetFilters = () => {
@@ -256,26 +288,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
     });
   };
 
-  // Filter Logic (Memoized)
-  const filteredQuestions = useMemo(() => {
-    return questions.filter(q => {
-      const matchSearch = q.text.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchSubject = filterSubject ? q.subject === filterSubject : true;
-      const matchGrade = filterGrade ? q.gradeLevel === filterGrade : true;
-      const matchType = filterType ? q.type === filterType : true;
-      const matchDifficulty = filterDifficulty ? q.difficulty === filterDifficulty : true;
+  // Filter Logic (Server-side handled)
+  const filteredQuestions = questions; // Direct use as it's already filtered from server
 
-      return matchSearch && matchSubject && matchGrade && matchType && matchDifficulty;
-    });
-  }, [questions, searchTerm, filterSubject, filterGrade, filterType, filterDifficulty]);
-
-  const totalQuestionPages = Math.ceil(filteredQuestions.length / questionsPerPage);
-  const paginatedQuestions = useMemo(() => {
-    return filteredQuestions.slice(
-      (currentQuestionPage - 1) * questionsPerPage,
-      currentQuestionPage * questionsPerPage
-    );
-  }, [filteredQuestions, currentQuestionPage]);
+  const totalQuestionPages = Math.ceil(totalQuestions / questionsPerPage);
+  const paginatedQuestions = questions; // Direct use as it's already paginated from server
 
   // User Results Logic (Server-side Pagination)
   // userResults is already paginated and filtered from server
@@ -419,7 +436,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                 </div>
                 {(searchTerm || filterSubject || filterGrade || filterType || filterDifficulty) && (
                     <div className="mt-3 flex justify-between items-center text-sm">
-                        <span className="text-gray-500">共找到 {filteredQuestions.length} 个符合条件的题目</span>
+                        <span className="text-gray-500">共找到 {totalQuestions} 个符合条件的题目</span>
                         <button onClick={resetFilters} className="text-primary-600 hover:text-primary-800 font-medium">清空筛选</button>
                     </div>
                 )}
@@ -427,9 +444,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
 
             {/* List */}
             <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden">
-            {filteredQuestions.length === 0 ? (
+            {questions.length === 0 ? (
                 <div className="p-8 text-center text-gray-500">
-                    {questions.length === 0 ? '暂无题目，请创建新题目！' : '没有找到符合筛选条件的题目。'}
+                    {totalQuestions === 0 ? '暂无题目，请创建新题目！' : '没有找到符合筛选条件的题目。'}
                 </div>
             ) : (
                 <>

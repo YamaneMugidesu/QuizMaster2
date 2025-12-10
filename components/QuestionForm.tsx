@@ -146,30 +146,67 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    let options: string[] = [];
-    let finalCorrectAnswer = correctAnswer;
+    // --- Input Validation ---
+    const stripHtml = (html: string) => html.replace(/<[^>]+>/g, '').trim();
 
-    if (type === QuestionType.MULTIPLE_CHOICE || type === QuestionType.MULTIPLE_SELECT) {
-      options = [optionA, optionB, optionC, optionD];
-    } else if (type === QuestionType.TRUE_FALSE) {
-      options = ['正确', '错误'];
+    // 1. Validate Question Text
+    if (!questionText || stripHtml(questionText) === '') {
+        addToast("请输入题目内容", 'warning');
+        return;
     }
 
-    if (type === QuestionType.MULTIPLE_SELECT) {
+    // 2. Validate Options (for Choice questions)
+    if (type === QuestionType.MULTIPLE_CHOICE || type === QuestionType.MULTIPLE_SELECT) {
+        if (!optionA || stripHtml(optionA) === '') {
+             addToast("请输入选项 A 的内容", 'warning');
+             return;
+        }
+        if (!optionB || stripHtml(optionB) === '') {
+             addToast("请输入选项 B 的内容", 'warning');
+             return;
+        }
+        // Ideally we might want to allow 2-4 options, but currently UI enforces 4 inputs. 
+        // We'll just enforce A and B for now to allow 2-option questions if desired, 
+        // though the UI renders 4 slots.
+    }
+
+    // 3. Validate Correct Answer
+    let finalCorrectAnswer = correctAnswer;
+    
+    if (type === QuestionType.MULTIPLE_CHOICE) {
+        if (!correctAnswer) {
+            addToast("请选择正确答案", 'warning');
+            return;
+        }
+    } else if (type === QuestionType.TRUE_FALSE) {
+        if (!correctAnswer) {
+            addToast("请选择正确答案", 'warning');
+            return;
+        }
+    } else if (type === QuestionType.SHORT_ANSWER) {
+         if (!correctAnswer || stripHtml(correctAnswer) === '') {
+             addToast("请输入参考答案", 'warning');
+             return;
+         }
+    } else if (type === QuestionType.MULTIPLE_SELECT) {
         finalCorrectAnswer = JSON.stringify(correctOptions.sort());
         if (correctOptions.length === 0) {
             addToast("请至少选择一个正确选项", 'warning');
             return;
         }
     } else if (type === QuestionType.FILL_IN_THE_BLANK) {
-        // Filter out empty blanks? Maybe not, user might want to leave placeholders.
-        // But we should probably remove trailing empty blanks or just save as is.
-        // Let's save as JSON to handle rich text safely.
         finalCorrectAnswer = JSON.stringify(blankAnswers);
-        if (blankAnswers.every(b => !b || b.trim() === '' || b === '<p><br></p>')) {
+        if (blankAnswers.every(b => !b || stripHtml(b) === '')) {
              addToast("请至少输入一个填空答案", 'warning');
              return;
         }
+    }
+
+    let options: string[] = [];
+    if (type === QuestionType.MULTIPLE_CHOICE || type === QuestionType.MULTIPLE_SELECT) {
+      options = [optionA, optionB, optionC, optionD];
+    } else if (type === QuestionType.TRUE_FALSE) {
+      options = ['正确', '错误'];
     }
 
     onSubmit({
