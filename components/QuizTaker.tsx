@@ -253,17 +253,20 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
   }
 
   // Calculate Blank Count and Current Blank Answers for Fill-in-the-blank
-  let blankCount = 1;
+  let blankCount = currentQ.blankCount || 1; // Use server-provided count first
   let currentBlankAnswers: string[] = [];
   
   if (currentQ.type === QuestionType.FILL_IN_THE_BLANK) {
-      try {
-          const parsed = JSON.parse(currentQ.correctAnswer);
-          if (Array.isArray(parsed)) blankCount = parsed.length;
-          else blankCount = 1;
-      } catch {
-          if (currentQ.correctAnswer && currentQ.correctAnswer.includes(';&&;')) {
-              blankCount = currentQ.correctAnswer.split(';&&;').length;
+      // Fallback calculation if blankCount not provided (legacy support)
+      if (!currentQ.blankCount) {
+          try {
+              const parsed = JSON.parse(currentQ.correctAnswer);
+              if (Array.isArray(parsed)) blankCount = parsed.length;
+              else blankCount = 1;
+          } catch {
+              if (currentQ.correctAnswer && currentQ.correctAnswer.includes(';&&;')) {
+                  blankCount = currentQ.correctAnswer.split(';&&;').length;
+              }
           }
       }
       
@@ -315,7 +318,7 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
           )}
 
           <h2 
-            className="text-2xl font-bold text-gray-900 mb-8 ql-editor rich-text-content" 
+            className="text-2xl text-gray-900 mb-8 ql-editor rich-text-content" 
             style={{ padding: 0 }}
             dangerouslySetInnerHTML={{ __html: currentQ.text }} 
           />

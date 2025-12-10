@@ -42,6 +42,7 @@ export interface Question {
   score?: number; // Runtime score assigned by quiz config
   needsGrading?: boolean; // For SHORT_ANSWER: requires manual grading
   explanation?: string; // New field for answer explanation
+  blankCount?: number; // Runtime field for FILL_IN_THE_BLANK questions to indicate number of inputs
 }
 
 export interface QuizAttempt {

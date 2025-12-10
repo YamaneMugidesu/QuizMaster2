@@ -305,11 +305,29 @@ export const generateQuiz = async (configId: string): Promise<{ questions: Quest
             const shuffled = mappedQuestions.sort(() => 0.5 - Math.random());
             
             // Apply score from config part
-            const selectedQuestions = shuffled.slice(0, part.count).map(q => ({
-                ...q,
-                score: part.score, // Override question score with config part score
-                correctAnswer: '' // SECURITY: Clear correct answer for client
-            }));
+            const selectedQuestions = shuffled.slice(0, part.count).map(q => {
+                let blankCount = undefined;
+                if (q.type === QuestionType.FILL_IN_THE_BLANK) {
+                    try {
+                        const parsed = JSON.parse(q.correctAnswer);
+                        if (Array.isArray(parsed)) blankCount = parsed.length;
+                        else blankCount = 1;
+                    } catch {
+                        if (q.correctAnswer && q.correctAnswer.includes(';&&;')) {
+                            blankCount = q.correctAnswer.split(';&&;').length;
+                        } else {
+                            blankCount = 1;
+                        }
+                    }
+                }
+
+                return {
+                    ...q,
+                    score: part.score, // Override question score with config part score
+                    correctAnswer: '', // SECURITY: Clear correct answer for client
+                    blankCount: blankCount
+                };
+            });
 
             allQuestions = [...allQuestions, ...selectedQuestions];
         }
