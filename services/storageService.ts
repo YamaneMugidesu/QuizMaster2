@@ -134,7 +134,7 @@ export const getQuizConfigs = async (): Promise<QuizConfig[]> => {
     console.error('Error fetching configs:', error);
     return [];
   }
-  return data.map(mapConfigFromDB);
+  return (data || []).map(mapConfigFromDB);
 };
 
 export const getQuizConfig = async (id: string): Promise<QuizConfig | null> => {
@@ -390,6 +390,32 @@ export const getUserResults = async (userId: string): Promise<QuizResult[]> => {
   return data.map(mapResultFromDB);
 };
 
+export const getPaginatedUserResultsByUserId = async (
+  userId: string,
+  page: number,
+  limit: number
+): Promise<{ data: QuizResult[]; total: number }> => {
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+
+  const { data, count, error } = await supabase
+    .from('quiz_results')
+    .select('*', { count: 'exact' })
+    .eq('user_id', userId)
+    .order('timestamp', { ascending: false })
+    .range(from, to);
+
+  if (error) {
+    console.error('Error fetching user results:', error);
+    return { data: [], total: 0 };
+  }
+
+  return {
+    data: (data || []).map(mapResultFromDB),
+    total: count || 0
+  };
+};
+
 export const getAllUserResults = async (): Promise<QuizResult[]> => {
   const { data, error } = await supabase
     .from('quiz_results')
@@ -398,6 +424,36 @@ export const getAllUserResults = async (): Promise<QuizResult[]> => {
 
   if (error) return [];
   return data.map(mapResultFromDB);
+};
+
+export const getPaginatedUserResults = async (
+  page: number, 
+  limit: number, 
+  searchTerm?: string
+): Promise<{ data: QuizResult[]; total: number }> => {
+  let query = supabase
+    .from('quiz_results')
+    .select('*', { count: 'exact' })
+    .order('timestamp', { ascending: false });
+
+  if (searchTerm) {
+    query = query.ilike('username', `%${searchTerm}%`);
+  }
+
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+
+  const { data, count, error } = await query.range(from, to);
+
+  if (error) {
+    console.error('Error fetching paginated results:', error);
+    return { data: [], total: 0 };
+  }
+
+  return {
+    data: (data || []).map(mapResultFromDB),
+    total: count || 0
+  };
 };
 
 export const gradeQuizResult = async (resultId: string, attempts: any[], finalScore: number, isPassed: boolean): Promise<void> => {

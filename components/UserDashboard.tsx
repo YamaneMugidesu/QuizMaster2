@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { QuizResult, User, QuizConfig } from '../types';
-import { getUserResults, getQuizConfigs } from '../services/storageService';
+import { getUserResults, getQuizConfigs, getPaginatedUserResultsByUserId } from '../services/storageService';
 import { Button } from './Button';
 
 interface UserDashboardProps {
@@ -12,26 +12,41 @@ interface UserDashboardProps {
 
 export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onStartQuiz, onViewResult }) => {
   const [history, setHistory] = useState<QuizResult[]>([]);
+  const [totalHistory, setTotalHistory] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [configs, setConfigs] = useState<QuizConfig[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
+  // Config Pagination
+  const [currentConfigPage, setCurrentConfigPage] = useState(1);
+  const configItemsPerPage = 6;
+  const [configSearchTerm, setConfigSearchTerm] = useState('');
+
+  // Initial Data Load (Configs)
   useEffect(() => {
-    const fetchData = async () => {
-        setIsLoading(true);
-        const [loadedHistory, loadedConfigs] = await Promise.all([
-            getUserResults(user.id),
-            getQuizConfigs()
-        ]);
-        setHistory(loadedHistory);
+    const fetchConfigs = async () => {
+        const loadedConfigs = await getQuizConfigs();
         setConfigs(loadedConfigs);
-        setIsLoading(false);
+        setIsInitialLoading(false);
     };
-    fetchData();
-  }, [user.id]);
+    fetchConfigs();
+  }, []);
 
-  if (isLoading) {
-      return <div className="p-20 text-center text-gray-500">加载数据中...</div>;
-  }
+  // History Data Load (Pagination)
+  useEffect(() => {
+    const fetchHistory = async () => {
+        setIsHistoryLoading(true);
+        const { data: loadedHistory, total } = await getPaginatedUserResultsByUserId(user.id, currentPage, itemsPerPage);
+        setHistory(loadedHistory);
+        setTotalHistory(total);
+        setIsHistoryLoading(false);
+    };
+    fetchHistory();
+  }, [user.id, currentPage]);
+
+
 
   const formatDuration = (seconds?: number) => {
     if (seconds === undefined || seconds === null) return '-';
@@ -64,6 +79,29 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onStartQuiz,
     });
   };
 
+  // Config Pagination Logic
+  const filteredConfigs = React.useMemo(() => {
+    return configs.filter(c => 
+        (c.name || '').toLowerCase().includes(configSearchTerm.toLowerCase()) || 
+        (c.description || '').toLowerCase().includes(configSearchTerm.toLowerCase())
+    );
+  }, [configs, configSearchTerm]);
+
+  const visibleConfigs = filteredConfigs.slice(
+      (currentConfigPage - 1) * configItemsPerPage,
+      currentConfigPage * configItemsPerPage
+  );
+  const totalConfigPages = Math.ceil(filteredConfigs.length / configItemsPerPage);
+
+  // Reset page when search changes
+  useEffect(() => {
+    setCurrentConfigPage(1);
+  }, [configSearchTerm]);
+
+  if (isInitialLoading) {
+      return <div className="p-20 text-center text-gray-500">加载数据中...</div>;
+  }
+
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-fade-in">
       
@@ -79,16 +117,33 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onStartQuiz,
                     <p className="text-gray-500">请选择一套试卷开始挑战</p>
                 </div>
              </div>
+             <div className="relative w-full md:w-64">
+                <input
+                    type="text"
+                    placeholder="搜索试卷..."
+                    value={configSearchTerm}
+                    onChange={(e) => setConfigSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-shadow"
+                />
+                <svg className="w-5 h-5 text-gray-400 absolute left-3 top-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+             </div>
          </div>
 
          {/* Exam Cards Grid */}
-         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
              {configs.length === 0 ? (
                  <div className="col-span-full text-center py-8 bg-gray-50 rounded-xl text-gray-500">
                      暂无可用试卷，请联系管理员配置。
                  </div>
+             ) : filteredConfigs.length === 0 ? (
+                 <div className="col-span-full text-center py-12 bg-gray-50 rounded-xl text-gray-500">
+                     <p className="text-lg mb-2">🔍</p>
+                     未找到匹配 "{configSearchTerm}" 的试卷
+                 </div>
              ) : (
-                 configs.map(config => (
+                 visibleConfigs.map(config => (
                      <div key={config.id} className="group bg-white border border-gray-200 rounded-xl p-5 hover:shadow-lg hover:border-primary-300 transition-all flex flex-col relative overflow-hidden">
                          <div className="absolute top-0 right-0 bg-primary-50 px-2 py-1 rounded-bl-lg text-xs font-bold text-primary-600">
                              {config.totalQuestions} 题
@@ -104,16 +159,45 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onStartQuiz,
                  ))
              )}
          </div>
+
+         {/* Config Pagination Controls */}
+         {totalConfigPages > 1 && (
+             <div className="flex justify-center items-center space-x-2 pb-4">
+                <Button 
+                    variant="secondary" 
+                    size="sm"
+                    disabled={currentConfigPage === 1}
+                    onClick={() => setCurrentConfigPage(prev => Math.max(1, prev - 1))}
+                >
+                    上一页
+                </Button>
+                <span className="text-sm text-gray-500">
+                    第 {currentConfigPage} / {totalConfigPages} 页
+                </span>
+                <Button 
+                    variant="secondary" 
+                    size="sm"
+                    disabled={currentConfigPage === totalConfigPages}
+                    onClick={() => setCurrentConfigPage(prev => Math.min(totalConfigPages, prev + 1))}
+                >
+                    下一页
+                </Button>
+             </div>
+         )}
       </div>
 
       {/* History Section */}
       <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-100">
         <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
             <h3 className="font-bold text-gray-800 text-lg">答题历史记录</h3>
-            <span className="bg-white px-3 py-1 rounded-full text-xs text-gray-500 border">共 {history.length} 次挑战</span>
+            <span className="bg-white px-3 py-1 rounded-full text-xs text-gray-500 border">共 {totalHistory} 次挑战</span>
         </div>
         
-        {history.length === 0 ? (
+        {isHistoryLoading ? (
+             <div className="p-10 text-center text-gray-500">
+                加载历史记录中...
+             </div>
+        ) : history.length === 0 ? (
           <div className="p-10 text-center text-gray-500">
              暂无答题记录，快去选择试卷开始挑战吧！
           </div>
@@ -197,6 +281,46 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onStartQuiz,
                    ))}
                 </tbody>
              </table>
+             
+             {/* Pagination Controls */}
+             {Math.ceil(totalHistory / itemsPerPage) > 1 && (
+                 <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50">
+                     <div className="text-sm text-gray-500">
+                         显示 {((currentPage - 1) * itemsPerPage) + 1} 到 {Math.min(currentPage * itemsPerPage, totalHistory)} 条，共 {totalHistory} 条
+                     </div>
+                     <div className="flex space-x-2">
+                         <Button 
+                             variant="secondary" 
+                             size="sm"
+                             disabled={currentPage === 1}
+                             onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                         >
+                             上一页
+                         </Button>
+                         {Array.from({ length: Math.ceil(totalHistory / itemsPerPage) }, (_, i) => i + 1).map(page => (
+                             <button
+                                 key={page}
+                                 onClick={() => setCurrentPage(page)}
+                                 className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${
+                                     currentPage === page
+                                         ? 'bg-primary-600 text-white shadow-sm'
+                                         : 'text-gray-600 hover:bg-gray-200'
+                                 }`}
+                             >
+                                 {page}
+                             </button>
+                         ))}
+                         <Button 
+                             variant="secondary" 
+                             size="sm"
+                             disabled={currentPage === Math.ceil(totalHistory / itemsPerPage)}
+                             onClick={() => setCurrentPage(prev => Math.min(Math.ceil(totalHistory / itemsPerPage), prev + 1))}
+                         >
+                             下一页
+                         </Button>
+                     </div>
+                 </div>
+             )}
           </div>
         )}
       </div>

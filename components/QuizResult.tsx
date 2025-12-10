@@ -59,20 +59,26 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
   };
 
   // Helper to get full question details, falling back to snapshot if deleted
+  // We prioritize snapshot to ensure historical accuracy (if question changed after exam)
   const getQuestionText = (id: string, snapshot?: string) => {
+    // If snapshot exists, use it (historical version)
+    if (snapshot) return snapshot;
+    // Otherwise try to find current version (legacy records or fallback)
     const q = allQuestions.find(q => String(q.id) === String(id));
-    return q?.text || snapshot || "该题目已完全从题库中删除且无备份";
+    return q?.text || "该题目已完全从题库中删除且无备份";
   };
   
   const getQuestionImages = (id: string, snapshot?: string[]) => {
+    if (snapshot && snapshot.length > 0) return snapshot;
     const q = allQuestions.find(q => String(q.id) === String(id));
     if (q) return q.imageUrls || ((q as any).imageUrl ? [(q as any).imageUrl] : []);
-    return snapshot || [];
+    return [];
   }
 
   const getCorrectAnswerRaw = (id: string, snapshot?: string) => {
+    if (snapshot) return snapshot;
     const q = allQuestions.find(q => String(q.id) === String(id));
-    return q?.correctAnswer || snapshot || "未知";
+    return q?.correctAnswer || "未知";
   };
 
   const renderRichTextAnswer = (content: string) => {
@@ -100,8 +106,9 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
 
   // Helper to get explanation, falling back to snapshot
   const getExplanation = (id: string, snapshot?: string) => {
+    if (snapshot) return snapshot;
     const q = allQuestions.find(q => String(q.id) === String(id));
-    return q?.explanation || snapshot || "";
+    return q?.explanation || "";
   };
 
   const calculatePartScores = () => {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Suspense } from 'react';
-import { Question, QuestionType, Difficulty, GradeLevel, QuestionCategory } from '../types';
+import { Question, QuestionType, Difficulty, GradeLevel, QuestionCategory, SUBJECTS, QuestionFormData } from '../types';
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
 // import { RichTextEditor } from './RichTextEditor';
@@ -7,28 +7,12 @@ import { ImageWithPreview } from './ImageWithPreview';
 // Lazy load RichTextEditor to prevent initial bundle crash if Quill fails
 const RichTextEditor = React.lazy(() => import('./RichTextEditor').then(module => ({ default: module.RichTextEditor })));
 
-export interface QuestionFormData {
-  type: QuestionType;
-  text: string;
-  imageUrls: string[];
-  options: string[];
-  correctAnswer: string;
-  subject: string;
-  difficulty: Difficulty;
-  gradeLevel: GradeLevel;
-  category: QuestionCategory;
-  needsGrading?: boolean;
-  explanation?: string;
-}
-
 interface QuestionFormProps {
   initialData?: Question;
   onSubmit: (data: QuestionFormData) => void;
   onCancel?: () => void;
   submitLabel?: string;
 }
-
-const SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '地理', '政治', '历史'];
 
 export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmit, onCancel, submitLabel = '保存题目' }) => {
   const [type, setType] = useState<QuestionType>(QuestionType.MULTIPLE_CHOICE);

@@ -106,6 +106,23 @@ export interface QuizPartConfig {
   score: number; // Points per question in this part
 }
 
+// --- Shared Constants ---
+export const SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '地理', '政治', '历史'];
+
+export interface QuestionFormData {
+  type: QuestionType;
+  text: string;
+  imageUrls: string[];
+  options: string[];
+  correctAnswer: string;
+  subject: string;
+  difficulty: Difficulty;
+  gradeLevel: GradeLevel;
+  category: QuestionCategory;
+  needsGrading?: boolean;
+  explanation?: string;
+}
+
 export interface QuizConfig {
   id: string;
   name: string;

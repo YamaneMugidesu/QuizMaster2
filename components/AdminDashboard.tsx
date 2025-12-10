@@ -1,23 +1,23 @@
 
-import React, { useState, useEffect } from 'react';
-import { Question, QuestionType, QuizResult, Difficulty, GradeLevel, User, UserRole, QuizConfig, QuestionCategory } from '../types';
-import { getQuestions, saveQuestion, deleteQuestion, updateQuestion, toggleQuestionVisibility, getAllUserResults, gradeQuizResult, getQuizConfigs } from '../services/storageService';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Question, QuestionType, Difficulty, GradeLevel, QuestionFormData, UserRole, QuizResult, User, SUBJECTS, QuizConfig, QuestionCategory } from '../types';
+import { saveQuestion, getQuestions, updateQuestion, deleteQuestion, toggleQuestionVisibility, getAllUserResults, getPaginatedUserResults, getQuizConfigs } from '../services/storageService';
 import { Button } from './Button';
-import { QuestionForm, QuestionFormData } from './QuestionForm';
-import { QuizConfigForm } from './QuizConfigForm';
+import { QuestionForm } from './QuestionForm';
 import { UserManagement } from './UserManagement';
+import { QuizConfigForm } from './QuizConfigForm';
+import { ImageWithPreview } from './ImageWithPreview';
 import { GradingModal } from './GradingModal';
 
 interface AdminDashboardProps {
-  onViewResult: (result: QuizResult) => void;
   currentUser: User;
+  onViewResult: (result: QuizResult) => void;
 }
 
-const SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '地理', '政治', '历史'];
-
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onViewResult, currentUser }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onViewResult }) => {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [userResults, setUserResults] = useState<QuizResult[]>([]);
+  const [totalUserResults, setTotalUserResults] = useState(0);
   const [quizConfigs, setQuizConfigs] = useState<QuizConfig[]>([]);
   const [activeTab, setActiveTab] = useState<'list' | 'create' | 'records' | 'config' | 'users'>('list');
   const [isLoading, setIsLoading] = useState(true);
@@ -26,6 +26,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onViewResult, cu
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   const [userSearchTerm, setUserSearchTerm] = useState('');
+
+  // Pagination for Questions
+  const [currentQuestionPage, setCurrentQuestionPage] = useState(1);
+  const questionsPerPage = 10;
 
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
@@ -48,23 +52,51 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onViewResult, cu
   }, [activeTab]);
 
   const loadData = async () => {
-    setIsLoading(true);
-    const loadedQuestions = await getQuestions();
-    setQuestions(loadedQuestions.sort((a, b) => b.createdAt - a.createdAt));
+    // Only load questions if we are in list mode
+    if (activeTab === 'list') {
+        setIsLoading(true);
+        const loadedQuestions = await getQuestions();
+        setQuestions(loadedQuestions.sort((a, b) => b.createdAt - a.createdAt));
+        setIsLoading(false);
+    }
     
     if (activeTab === 'records') {
-       const results = await getAllUserResults();
-       setUserResults(results);
-       const configs = await getQuizConfigs();
-       setQuizConfigs(configs);
+       // Only fetch configs here. Results are fetched by separate effect
+       if (quizConfigs.length === 0) {
+           const configs = await getQuizConfigs();
+           setQuizConfigs(configs);
+       }
     }
-    setIsLoading(false);
   };
+
+  // Fetch User Results (Server-side Pagination)
+  useEffect(() => {
+    if (activeTab === 'records') {
+        const fetchResults = async () => {
+            setIsLoading(true);
+            const { data, total } = await getPaginatedUserResults(currentPage, itemsPerPage, userSearchTerm);
+            setUserResults(data);
+            setTotalUserResults(total);
+            setIsLoading(false);
+        };
+
+        const timer = setTimeout(() => {
+            fetchResults();
+        }, 300); // Debounce search
+
+        return () => clearTimeout(timer);
+    }
+  }, [activeTab, currentPage, userSearchTerm]);
 
   // Reset pagination when switching tabs or searching
   useEffect(() => {
     setCurrentPage(1);
   }, [activeTab, userSearchTerm]);
+
+  // Reset question pagination when searching/filtering
+  useEffect(() => {
+    setCurrentQuestionPage(1);
+  }, [activeTab, searchTerm, filterSubject, filterGrade, filterType, filterDifficulty]);
 
   const handleCreate = async (data: QuestionFormData) => {
     const newQ: Question = {
@@ -209,8 +241,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onViewResult, cu
     });
   };
 
-  // Filter Logic
-  const filteredQuestions = questions.filter(q => {
+  // Filter Logic (Memoized)
+  const filteredQuestions = useMemo(() => {
+    return questions.filter(q => {
       const matchSearch = q.text.toLowerCase().includes(searchTerm.toLowerCase());
       const matchSubject = filterSubject ? q.subject === filterSubject : true;
       const matchGrade = filterGrade ? q.gradeLevel === filterGrade : true;
@@ -218,19 +251,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onViewResult, cu
       const matchDifficulty = filterDifficulty ? q.difficulty === filterDifficulty : true;
 
       return matchSearch && matchSubject && matchGrade && matchType && matchDifficulty;
-  });
+    });
+  }, [questions, searchTerm, filterSubject, filterGrade, filterType, filterDifficulty]);
 
-  // User Results Logic (Search & Pagination)
-  const filteredUserResults = userResults.filter(r => {
-      if (!userSearchTerm) return true;
-      return r.username.toLowerCase().includes(userSearchTerm.toLowerCase());
-  });
+  const totalQuestionPages = Math.ceil(filteredQuestions.length / questionsPerPage);
+  const paginatedQuestions = useMemo(() => {
+    return filteredQuestions.slice(
+      (currentQuestionPage - 1) * questionsPerPage,
+      currentQuestionPage * questionsPerPage
+    );
+  }, [filteredQuestions, currentQuestionPage]);
 
-  const totalPages = Math.ceil(filteredUserResults.length / itemsPerPage);
-  const paginatedUserResults = filteredUserResults.slice(
-      (currentPage - 1) * itemsPerPage,
-      currentPage * itemsPerPage
-  );
+  // User Results Logic (Server-side Pagination)
+  // userResults is already paginated and filtered from server
+  const totalPages = Math.ceil(totalUserResults / itemsPerPage);
+  const paginatedUserResults = userResults;
 
   if (isLoading && activeTab === 'list' && questions.length === 0) {
       return <div className="p-10 text-center">加载中...</div>;
@@ -370,8 +405,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onViewResult, cu
                     {questions.length === 0 ? '暂无题目，请创建新题目！' : '没有找到符合筛选条件的题目。'}
                 </div>
             ) : (
+                <>
                 <ul className="divide-y divide-gray-100">
-                {filteredQuestions.map((q) => (
+                {paginatedQuestions.map((q) => (
                     <li key={q.id} className={`p-4 transition-colors ${q.isDisabled ? 'bg-gray-100' : 'hover:bg-gray-50'}`}>
                     <div className="flex justify-between items-start">
                         <div className={`flex-1 ${q.isDisabled ? 'opacity-50' : ''}`}>
@@ -490,6 +526,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onViewResult, cu
                     </li>
                 ))}
                 </ul>
+                {totalQuestionPages > 1 && (
+                    <div className="flex items-center justify-between px-6 py-3 border-t border-gray-100 bg-gray-50">
+                        <div className="text-sm text-gray-500">
+                            显示 {(currentQuestionPage - 1) * questionsPerPage + 1} 到 {Math.min(currentQuestionPage * questionsPerPage, filteredQuestions.length)} 条，共 {filteredQuestions.length} 条
+                        </div>
+                        <div className="flex gap-2">
+                            <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                disabled={currentQuestionPage === 1}
+                                onClick={() => setCurrentQuestionPage(prev => Math.max(1, prev - 1))}
+                            >
+                                上一页
+                            </Button>
+                            <div className="flex items-center gap-1">
+                                {Array.from({ length: totalQuestionPages }, (_, i) => i + 1).map(page => {
+                                    if (
+                                        page === 1 || 
+                                        page === totalQuestionPages || 
+                                        (page >= currentQuestionPage - 1 && page <= currentQuestionPage + 1)
+                                    ) {
+                                        return (
+                                            <button
+                                                key={page}
+                                                onClick={() => setCurrentQuestionPage(page)}
+                                                className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${
+                                                    currentQuestionPage === page 
+                                                    ? 'bg-primary-600 text-white shadow-sm' 
+                                                    : 'text-gray-600 hover:bg-gray-200'
+                                                }`}
+                                            >
+                                                {page}
+                                            </button>
+                                        );
+                                    } else if (
+                                        page === currentQuestionPage - 2 || 
+                                        page === currentQuestionPage + 2
+                                    ) {
+                                        return <span key={page} className="text-gray-400">...</span>;
+                                    }
+                                    return null;
+                                })}
+                            </div>
+                            <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                disabled={currentQuestionPage === totalQuestionPages}
+                                onClick={() => setCurrentQuestionPage(prev => Math.min(totalQuestionPages, prev + 1))}
+                            >
+                                下一页
+                            </Button>
+                        </div>
+                    </div>
+                )}
+                </>
             )}
             </div>
         </div>
@@ -515,7 +606,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onViewResult, cu
              </div>
              {isLoading ? (
                 <div className="p-10 text-center text-gray-500">加载中...</div>
-             ) : filteredUserResults.length === 0 ? (
+             ) : totalUserResults === 0 ? (
                 <div className="p-10 text-center text-gray-500">
                    {userSearchTerm ? '未找到匹配的用户记录' : '暂无任何用户答题记录。'}
                 </div>
@@ -606,7 +697,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onViewResult, cu
                    {totalPages > 1 && (
                        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50">
                            <div className="text-sm text-gray-500">
-                               显示 {((currentPage - 1) * itemsPerPage) + 1} 到 {Math.min(currentPage * itemsPerPage, filteredUserResults.length)} 条，共 {filteredUserResults.length} 条
+                               显示 {((currentPage - 1) * itemsPerPage) + 1} 到 {Math.min(currentPage * itemsPerPage, totalUserResults)} 条，共 {totalUserResults} 条
                            </div>
                            <div className="flex space-x-2">
                                <Button 

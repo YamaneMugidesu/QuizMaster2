@@ -84,14 +84,19 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setView('dashboard');
-    setCurrentResult(null);
-    setUsername('');
-    setPassword('');
-    setAuthError('');
-    setActiveConfigId('');
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error('Error signing out:', error);
+    } finally {
+      setUser(null);
+      setView('dashboard');
+      setCurrentResult(null);
+      setUsername('');
+      setPassword('');
+      setAuthError('');
+      setActiveConfigId('');
+    }
   };
 
   const handleStartQuiz = (configId: string) => {
@@ -136,7 +141,7 @@ const App: React.FC = () => {
                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
             </svg>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">QuizMaster AI</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">准入考核平台</h1>
           <p className="text-gray-500 mb-8">{authMode === 'login' ? '请登录您的账户' : '创建一个新账户'}</p>
           
           <form onSubmit={handleAuthSubmit} className="space-y-4 text-left">
@@ -199,37 +204,32 @@ const App: React.FC = () => {
     );
   }
 
-  // App Header
-  const Header = () => (
-    <header className="bg-white shadow-sm sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          <div className="flex items-center cursor-pointer" onClick={() => setView('dashboard')}>
-             <div className="bg-primary-600 text-white p-1.5 rounded-lg mr-2">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-             </div>
-             <span className="font-bold text-xl text-gray-800">QuizMaster AI</span>
-          </div>
-          <div className="flex items-center gap-4">
-             <div className="hidden sm:flex flex-col items-end mr-2">
-                <span className="text-sm font-bold text-gray-800">{user.username}</span>
-                <span className="text-xs text-gray-500">
-                    {user.role === UserRole.SUPER_ADMIN ? '超级管理员' : 
-                     user.role === UserRole.ADMIN ? '普通管理员' : '普通用户'}
-                </span>
-             </div>
-             <Button variant="ghost" onClick={handleLogout} className="text-sm border border-gray-200">退出</Button>
-          </div>
-        </div>
-      </div>
-    </header>
-  );
-
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header />
+      <header className="bg-white shadow-sm sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center cursor-pointer" onClick={() => setView('dashboard')}>
+               <div className="bg-primary-600 text-white p-1.5 rounded-lg mr-2">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+               </div>
+               <span className="font-bold text-xl text-gray-800">准入考核平台</span>
+            </div>
+            <div className="flex items-center gap-4">
+               <div className="hidden sm:flex flex-col items-end mr-2">
+                  <span className="text-sm font-bold text-gray-800">{user.username}</span>
+                  <span className="text-xs text-gray-500">
+                      {user.role === UserRole.SUPER_ADMIN ? '超级管理员' : 
+                       user.role === UserRole.ADMIN ? '普通管理员' : '普通用户'}
+                  </span>
+               </div>
+               <Button variant="ghost" onClick={handleLogout} className="text-sm border border-gray-200">退出</Button>
+            </div>
+          </div>
+        </div>
+      </header>
       <main className="max-w-7xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
         
         {/* Global Result View */}
