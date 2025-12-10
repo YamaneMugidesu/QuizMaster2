@@ -4,6 +4,7 @@ import { QuizResult, Question, QuestionType, QuizConfig, QuizPartConfig } from '
 import { getQuestions, getQuizConfig, gradeQuizResult } from '../services/storageService';
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
+import { useToast } from './Toast';
 
 interface QuizResultProps {
   result: QuizResult;
@@ -19,6 +20,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
   const [editingScores, setEditingScores] = useState<{ [key: number]: string }>({});
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const { addToast } = useToast();
 
   useEffect(() => {
       const load = async () => {
@@ -150,7 +152,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
       const maxScore = attempt.maxScore || 0;
 
       if (isNaN(newScore) || newScore < 0 || newScore > maxScore) {
-          alert(`分数必须在 0 到 ${maxScore} 之间`);
+          addToast(`分数必须在 0 到 ${maxScore} 之间`, 'warning');
           return;
       }
 

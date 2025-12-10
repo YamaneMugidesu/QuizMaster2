@@ -1,10 +1,21 @@
 
 import React, { useState, useEffect } from 'react';
 import { Question, QuestionType, QuizAttempt, QuizResult } from '../types';
-import { generateQuiz } from '../services/storageService';
+import { generateQuiz, gradeQuiz } from '../services/storageService';
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
 import { RichTextEditor } from './RichTextEditor';
+import { useToast } from './Toast';
+
+const STORAGE_KEY_PREFIX = 'quiz_autosave_';
+
+interface SavedSession {
+  questions: Question[];
+  answers: Record<string, string>;
+  configName: string;
+  passingScore: number;
+  timestamp: number;
+}
 
 interface QuizTakerProps {
   configId: string;
@@ -21,10 +32,33 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const startTime = React.useRef<number>(Date.now());
+  const { addToast } = useToast();
 
   useEffect(() => {
     const load = async () => {
-        // Load quiz based on specific configuration ID
+        const key = STORAGE_KEY_PREFIX + configId;
+        const savedJson = localStorage.getItem(key);
+        
+        if (savedJson) {
+            try {
+                const saved: SavedSession = JSON.parse(savedJson);
+                // Validate data integrity slightly
+                if (saved.questions && Array.isArray(saved.questions) && saved.questions.length > 0) {
+                    setQuestions(saved.questions);
+                    setConfigName(saved.configName);
+                    setPassingScore(saved.passingScore);
+                    setAnswers(saved.answers || {});
+                    setIsLoading(false);
+                    addToast('已恢复上次未完成的答题进度', 'info');
+                    return;
+                }
+            } catch (e) {
+                console.error("Invalid save data", e);
+                localStorage.removeItem(key);
+            }
+        }
+
+        // Load quiz based on specific configuration ID (if no save found)
         const { questions: quizQuestions, configName: name, passingScore: pScore } = await generateQuiz(configId); 
         setQuestions(quizQuestions);
         setConfigName(name);
@@ -33,6 +67,24 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
     };
     load();
   }, [configId]);
+
+  // Auto-save effect
+  useEffect(() => {
+      if (!isLoading && questions.length > 0) {
+          const session: SavedSession = {
+              questions,
+              answers,
+              configName,
+              passingScore,
+              timestamp: Date.now()
+          };
+          localStorage.setItem(STORAGE_KEY_PREFIX + configId, JSON.stringify(session));
+      }
+  }, [answers, questions, configName, passingScore, isLoading, configId]);
+
+  const clearAutoSave = () => {
+      localStorage.removeItem(STORAGE_KEY_PREFIX + configId);
+  };
 
   const handleAnswerChange = (value: string) => {
     const qId = questions[currentIdx].id;
@@ -102,99 +154,48 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
 
   const finishQuiz = async () => {
     setIsSubmitting(true);
-    let score = 0;
+    
+    // Prepare payload for grading service
+    const attemptsPayload = questions.map(q => ({
+        questionId: q.id,
+        userAnswer: answers[q.id] || '',
+        maxScore: q.score || 1
+    }));
+
+    // Call grading service
+    let gradedResult;
+    try {
+        gradedResult = await gradeQuiz(attemptsPayload);
+    } catch (error) {
+        console.error("Grading failed", error);
+        addToast('提交试卷失败，请重试', 'error');
+        setIsSubmitting(false);
+        return;
+    }
+
+    const { attempts: gradedAttempts, score } = gradedResult;
+    
     let maxScore = 0;
-    const attempts: QuizAttempt[] = [];
     let hasPendingGrading = false;
 
-    questions.forEach(q => {
-      const userAnswer = answers[q.id] || '';
-      let isCorrect = false;
-      const questionPoints = q.score || 1;
-      maxScore += questionPoints;
+    // Merge result and calculate totals
+    const finalAttempts: QuizAttempt[] = gradedAttempts.map((ga: any) => {
+        const q = questions.find(question => question.id === ga.questionId);
+        if (!q) return ga;
 
-      if (q.type === QuestionType.SHORT_ANSWER && q.needsGrading) {
-          hasPendingGrading = true;
-          isCorrect = false; // Mark as false for now, will be graded later
-      } else if (q.type === QuestionType.MULTIPLE_SELECT) {
-          try {
-             const userArr = JSON.parse(userAnswer || '[]');
-             const correctArr = JSON.parse(q.correctAnswer);
-             userArr.sort();
-             correctArr.sort();
-             isCorrect = JSON.stringify(userArr) === JSON.stringify(correctArr);
-          } catch {
-              isCorrect = false;
-          }
-      } else {
-          if (q.type === QuestionType.MULTIPLE_CHOICE || q.type === QuestionType.TRUE_FALSE) {
-              // For selection types, compare raw values (including HTML)
-              // This is crucial because the options contain HTML and correct answer is one of them
-              isCorrect = userAnswer === q.correctAnswer;
-          } else {
-              // For text input types (Fill in blank, Short answer auto-grade)
-              
-              if (q.type === QuestionType.FILL_IN_THE_BLANK) {
-                  // Handle Multi-Blank Logic
-                  let correctParts: string[] = [];
-                  let userParts: string[] = [];
+        const questionPoints = q.score || 1;
+        maxScore += questionPoints;
 
-                  // Parse Correct Answer
-                  try {
-                      const parsed = JSON.parse(q.correctAnswer);
-                      if (Array.isArray(parsed)) correctParts = parsed;
-                      else correctParts = [q.correctAnswer];
-                  } catch {
-                      // Fallback for semicolon (if implemented) or single string
-                      if (q.correctAnswer.includes(';&&;')) correctParts = q.correctAnswer.split(';&&;');
-                      else correctParts = [q.correctAnswer];
-                  }
+        if (q.type === QuestionType.SHORT_ANSWER && q.needsGrading) {
+            hasPendingGrading = true;
+        }
 
-                  // Parse User Answer
-                  try {
-                      const parsed = JSON.parse(userAnswer || '[]');
-                      if (Array.isArray(parsed)) userParts = parsed;
-                      else userParts = userAnswer ? [userAnswer] : [];
-                  } catch {
-                      userParts = userAnswer ? [userAnswer] : [];
-                  }
-
-                  // Compare each part
-                  // We assume order matters
-                  if (userParts.length !== correctParts.length) {
-                      isCorrect = false; // Count mismatch
-                  } else {
-                      isCorrect = correctParts.every((cPart, idx) => {
-                          const uPart = userParts[idx] || '';
-                          // Strip HTML from correct answer part for comparison
-                          const cleanCorrect = cPart.replace(/<[^>]+>/g, '').trim().toLowerCase();
-                          const cleanUser = uPart.trim().toLowerCase();
-                          return cleanUser === cleanCorrect;
-                      });
-                  }
-
-              } else {
-                  // Short Answer Auto-Grade (Single)
-                  const cleanCorrectAnswer = q.correctAnswer.replace(/<[^>]+>/g, '').trim().toLowerCase();
-                  const cleanUserAnswer = userAnswer.trim().toLowerCase();
-                  isCorrect = cleanUserAnswer === cleanCorrectAnswer;
-              }
-          }
-      }
-
-      if (isCorrect) score += questionPoints;
-      
-      attempts.push({
-        questionId: q.id,
-        userAnswer,
-        isCorrect,
-        questionText: q.text,
-        questionImageUrls: q.imageUrls || ((q as any).imageUrl ? [(q as any).imageUrl] : []),
-        correctAnswerText: q.correctAnswer,
-        score: isCorrect ? questionPoints : 0,
-        maxScore: questionPoints,
-        manualGrading: q.needsGrading
-      });
+        return {
+            ...ga,
+            questionText: q.text,
+            questionImageUrls: q.imageUrls || ((q as any).imageUrl ? [(q as any).imageUrl] : []),
+            manualGrading: q.needsGrading
+        };
     });
 
     const result: any = {
@@ -203,13 +204,14 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
       passingScore, // Save snapshot of passing score
       isPassed: !hasPendingGrading && score >= passingScore, // Determine status
       totalQuestions: questions.length,
-      attempts,
+      attempts: finalAttempts,
       configId: configId,
       configName: configName,
       status: hasPendingGrading ? 'pending_grading' : 'completed',
       duration: Math.floor((Date.now() - startTime.current) / 1000) // Duration in seconds
     };
 
+    clearAutoSave();
     onComplete(result);
     setIsSubmitting(false);
   };

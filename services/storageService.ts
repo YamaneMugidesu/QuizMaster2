@@ -49,9 +49,24 @@ const mapResultFromDB = (r: any): QuizResult => ({
   duration: r.duration
 });
 
+// --- CACHE STATE ---
+let questionsCache: { data: Question[]; timestamp: number } | null = null;
+let quizConfigsCache: { data: QuizConfig[]; timestamp: number } | null = null;
+let resultsCache: Map<string, { data: any; total?: number; timestamp: number }> = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+export const clearQuestionsCache = () => { questionsCache = null; };
+export const clearQuizConfigsCache = () => { quizConfigsCache = null; };
+export const clearResultsCache = () => { resultsCache.clear(); };
+
 // --- QUESTIONS API ---
 
 export const getQuestions = async (): Promise<Question[]> => {
+  // Check cache
+  if (questionsCache && (Date.now() - questionsCache.timestamp < CACHE_TTL)) {
+    return questionsCache.data;
+  }
+
   const { data, error } = await supabase
     .from('questions')
     .select('*')
@@ -61,10 +76,15 @@ export const getQuestions = async (): Promise<Question[]> => {
     console.error('Error fetching questions:', error);
     return [];
   }
-  return data.map(mapQuestionFromDB);
+  
+  const mapped = data.map(mapQuestionFromDB);
+  // Update cache
+  questionsCache = { data: mapped, timestamp: Date.now() };
+  return mapped;
 };
 
 export const saveQuestion = async (question: Question): Promise<void> => {
+  questionsCache = null; // Invalidate cache
   const { id, ...rest } = question;
   
   const dbPayload = {
@@ -89,6 +109,7 @@ export const saveQuestion = async (question: Question): Promise<void> => {
 };
 
 export const updateQuestion = async (updatedQuestion: Question): Promise<void> => {
+  questionsCache = null; // Invalidate cache
   const dbPayload = {
     type: updatedQuestion.type,
     text: updatedQuestion.text,
@@ -115,6 +136,7 @@ export const updateQuestion = async (updatedQuestion: Question): Promise<void> =
 };
 
 export const toggleQuestionVisibility = async (id: string): Promise<void> => {
+  questionsCache = null; // Invalidate cache
   const { data } = await supabase.from('questions').select('is_disabled').eq('id', id).single();
   if (data) {
     await supabase.from('questions').update({ is_disabled: !data.is_disabled }).eq('id', id);
@@ -122,6 +144,7 @@ export const toggleQuestionVisibility = async (id: string): Promise<void> => {
 };
 
 export const deleteQuestion = async (id: string): Promise<void> => {
+  questionsCache = null; // Invalidate cache
   const { error } = await supabase.from('questions').delete().eq('id', id);
   if (error) console.error('Error deleting question:', error);
 };
@@ -129,12 +152,21 @@ export const deleteQuestion = async (id: string): Promise<void> => {
 // --- CONFIGURATION API ---
 
 export const getQuizConfigs = async (): Promise<QuizConfig[]> => {
+  // Check cache
+  if (quizConfigsCache && (Date.now() - quizConfigsCache.timestamp < CACHE_TTL)) {
+    return quizConfigsCache.data;
+  }
+
   const { data, error } = await supabase.from('quiz_configs').select('*');
   if (error) {
     console.error('Error fetching configs:', error);
     return [];
   }
-  return (data || []).map(mapConfigFromDB);
+  
+  const mapped = (data || []).map(mapConfigFromDB);
+  // Update cache
+  quizConfigsCache = { data: mapped, timestamp: Date.now() };
+  return mapped;
 };
 
 export const getQuizConfig = async (id: string): Promise<QuizConfig | null> => {
@@ -147,6 +179,7 @@ export const getQuizConfig = async (id: string): Promise<QuizConfig | null> => {
 };
 
 export const saveQuizConfig = async (config: QuizConfig): Promise<void> => {
+  quizConfigsCache = null; // Invalidate cache
   const { id, ...rest } = config;
   const dbPayload = {
     name: rest.name,
@@ -168,6 +201,7 @@ export const saveQuizConfig = async (config: QuizConfig): Promise<void> => {
 };
 
 export const deleteQuizConfig = async (id: string): Promise<void> => {
+    quizConfigsCache = null; // Invalidate cache
     await supabase.from('quiz_configs').delete().eq('id', id);
 }
 
@@ -223,7 +257,8 @@ export const generateQuiz = async (configId: string): Promise<{ questions: Quest
             // Apply score from config part
             const selectedQuestions = shuffled.slice(0, part.count).map(q => ({
                 ...q,
-                score: part.score // Override question score with config part score
+                score: part.score, // Override question score with config part score
+                correctAnswer: '' // SECURITY: Clear correct answer for client
             }));
 
             allQuestions = [...allQuestions, ...selectedQuestions];
@@ -236,6 +271,99 @@ export const generateQuiz = async (configId: string): Promise<{ questions: Quest
         passingScore: mappedConfig.passingScore 
     };
 };
+
+export const gradeQuiz = async (attempts: { questionId: string; userAnswer: string; maxScore: number }[]): Promise<{ attempts: any[]; score: number }> => {
+    const questionIds = attempts.map(a => a.questionId);
+    
+    // Fetch original questions with correct answers from DB
+    const { data: questions } = await supabase
+      .from('questions')
+      .select('*')
+      .in('id', questionIds);
+  
+    if (!questions) return { attempts: [], score: 0 };
+  
+    const mappedQuestions = questions.map(mapQuestionFromDB);
+    
+    const gradedAttempts = attempts.map(attempt => {
+      const q = mappedQuestions.find(mq => mq.id === attempt.questionId);
+      if (!q) {
+          return { 
+              ...attempt, 
+              isCorrect: false, 
+              score: 0, 
+              correctAnswerText: 'Error loading question',
+              explanation: ''
+          };
+      }
+  
+      let isCorrect = false;
+      const userAnswer = attempt.userAnswer || '';
+  
+      // Grading Logic (Mirrors QuizTaker.tsx)
+      if (q.type === QuestionType.SHORT_ANSWER && q.needsGrading) {
+          isCorrect = false; // Mark as false/pending for manual grading
+      } else if (q.type === QuestionType.MULTIPLE_SELECT) {
+          try {
+             const userArr = JSON.parse(userAnswer || '[]');
+             const correctArr = JSON.parse(q.correctAnswer || '[]');
+             userArr.sort();
+             correctArr.sort();
+             isCorrect = JSON.stringify(userArr) === JSON.stringify(correctArr);
+          } catch {
+              isCorrect = false;
+          }
+      } else if (q.type === QuestionType.MULTIPLE_CHOICE || q.type === QuestionType.TRUE_FALSE) {
+          isCorrect = userAnswer === q.correctAnswer;
+      } else if (q.type === QuestionType.FILL_IN_THE_BLANK) {
+          let correctParts: string[] = [];
+          let userParts: string[] = [];
+          try {
+              const parsed = JSON.parse(q.correctAnswer || '[]');
+              if (Array.isArray(parsed)) correctParts = parsed;
+              else correctParts = [q.correctAnswer || ''];
+          } catch {
+              if (q.correctAnswer?.includes(';&&;')) correctParts = q.correctAnswer.split(';&&;');
+              else correctParts = [q.correctAnswer || ''];
+          }
+          try {
+              const parsed = JSON.parse(userAnswer || '[]');
+              if (Array.isArray(parsed)) userParts = parsed;
+              else userParts = userAnswer ? [userAnswer] : [];
+          } catch {
+              userParts = userAnswer ? [userAnswer] : [];
+          }
+          
+          if (userParts.length !== correctParts.length) {
+              isCorrect = false;
+          } else {
+              isCorrect = correctParts.every((cPart, idx) => {
+                  const uPart = userParts[idx] || '';
+                  const cleanCorrect = cPart.replace(/<[^>]+>/g, '').trim().toLowerCase();
+                  const cleanUser = uPart.trim().toLowerCase();
+                  return cleanUser === cleanCorrect;
+              });
+          }
+      } else {
+          // Short Answer Auto-Grade
+          const cleanCorrectAnswer = (q.correctAnswer || '').replace(/<[^>]+>/g, '').trim().toLowerCase();
+          const cleanUserAnswer = userAnswer.trim().toLowerCase();
+          isCorrect = cleanUserAnswer === cleanCorrectAnswer;
+      }
+  
+      return {
+         ...attempt,
+         isCorrect,
+         score: isCorrect ? attempt.maxScore : 0,
+         correctAnswerText: q.correctAnswer, // Restore correct answer for review
+         explanation: q.explanation
+      };
+    });
+  
+    const totalScore = gradedAttempts.reduce((sum, a) => sum + (a.score || 0), 0);
+    
+    return { attempts: gradedAttempts, score: totalScore };
+  };
 
 // --- USER API ---
 
@@ -359,6 +487,7 @@ export const getAllUsers = async (): Promise<User[]> => {
 // --- RESULTS HISTORY ---
 
 export const saveQuizResult = async (result: QuizResult): Promise<void> => {
+  resultsCache.clear(); // Invalidate results cache
   const dbPayload = {
       user_id: result.userId,
       username: result.username,
@@ -380,6 +509,14 @@ export const saveQuizResult = async (result: QuizResult): Promise<void> => {
 };
 
 export const getUserResults = async (userId: string): Promise<QuizResult[]> => {
+  const cacheKey = `user_all_${userId}`;
+  if (resultsCache.has(cacheKey)) {
+      const cached = resultsCache.get(cacheKey)!;
+      if (Date.now() - cached.timestamp < CACHE_TTL) {
+          return cached.data;
+      }
+  }
+
   const { data, error } = await supabase
     .from('quiz_results')
     .select('*')
@@ -387,7 +524,9 @@ export const getUserResults = async (userId: string): Promise<QuizResult[]> => {
     .order('timestamp', { ascending: false });
 
   if (error) return [];
-  return data.map(mapResultFromDB);
+  const mapped = data.map(mapResultFromDB);
+  resultsCache.set(cacheKey, { data: mapped, timestamp: Date.now() });
+  return mapped;
 };
 
 export const getPaginatedUserResultsByUserId = async (
@@ -395,6 +534,14 @@ export const getPaginatedUserResultsByUserId = async (
   page: number,
   limit: number
 ): Promise<{ data: QuizResult[]; total: number }> => {
+  const cacheKey = `user_paginated_${userId}_${page}_${limit}`;
+  if (resultsCache.has(cacheKey)) {
+      const cached = resultsCache.get(cacheKey)!;
+      if (Date.now() - cached.timestamp < CACHE_TTL) {
+          return { data: cached.data, total: cached.total || 0 };
+      }
+  }
+
   const from = (page - 1) * limit;
   const to = from + limit - 1;
 
@@ -410,20 +557,35 @@ export const getPaginatedUserResultsByUserId = async (
     return { data: [], total: 0 };
   }
 
+  const mapped = (data || []).map(mapResultFromDB);
+  const total = count || 0;
+  
+  resultsCache.set(cacheKey, { data: mapped, total, timestamp: Date.now() });
+
   return {
-    data: (data || []).map(mapResultFromDB),
-    total: count || 0
+    data: mapped,
+    total
   };
 };
 
 export const getAllUserResults = async (): Promise<QuizResult[]> => {
+  const cacheKey = `all_results`;
+  if (resultsCache.has(cacheKey)) {
+      const cached = resultsCache.get(cacheKey)!;
+      if (Date.now() - cached.timestamp < CACHE_TTL) {
+          return cached.data;
+      }
+  }
+
   const { data, error } = await supabase
     .from('quiz_results')
     .select('*')
     .order('timestamp', { ascending: false });
 
   if (error) return [];
-  return data.map(mapResultFromDB);
+  const mapped = data.map(mapResultFromDB);
+  resultsCache.set(cacheKey, { data: mapped, timestamp: Date.now() });
+  return mapped;
 };
 
 export const getPaginatedUserResults = async (
@@ -431,6 +593,14 @@ export const getPaginatedUserResults = async (
   limit: number, 
   searchTerm?: string
 ): Promise<{ data: QuizResult[]; total: number }> => {
+  const cacheKey = `paginated_results_${page}_${limit}_${searchTerm || ''}`;
+  if (resultsCache.has(cacheKey)) {
+      const cached = resultsCache.get(cacheKey)!;
+      if (Date.now() - cached.timestamp < CACHE_TTL) {
+          return { data: cached.data, total: cached.total || 0 };
+      }
+  }
+
   let query = supabase
     .from('quiz_results')
     .select('*', { count: 'exact' })
@@ -450,13 +620,19 @@ export const getPaginatedUserResults = async (
     return { data: [], total: 0 };
   }
 
+  const mapped = (data || []).map(mapResultFromDB);
+  const total = count || 0;
+  
+  resultsCache.set(cacheKey, { data: mapped, total, timestamp: Date.now() });
+
   return {
-    data: (data || []).map(mapResultFromDB),
-    total: count || 0
+    data: mapped,
+    total
   };
 };
 
 export const gradeQuizResult = async (resultId: string, attempts: any[], finalScore: number, isPassed: boolean): Promise<void> => {
+  resultsCache.clear(); // Invalidate results cache
   const { error } = await supabase
     .from('quiz_results')
     .update({

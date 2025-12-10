@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Question, QuestionType, Difficulty, GradeLevel, QuestionFormData, UserRole, QuizResult, User, SUBJECTS, QuizConfig, QuestionCategory } from '../types';
-import { saveQuestion, getQuestions, updateQuestion, deleteQuestion, toggleQuestionVisibility, getAllUserResults, getPaginatedUserResults, getQuizConfigs } from '../services/storageService';
+import { saveQuestion, getQuestions, updateQuestion, deleteQuestion, toggleQuestionVisibility, getAllUserResults, getPaginatedUserResults, getQuizConfigs, clearQuestionsCache, clearResultsCache } from '../services/storageService';
 import { Button } from './Button';
 import { QuestionForm } from './QuestionForm';
 import { UserManagement } from './UserManagement';
@@ -67,6 +67,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
            setQuizConfigs(configs);
        }
     }
+  };
+
+  const refreshData = async () => {
+      setIsLoading(true);
+      if (activeTab === 'list') {
+          clearQuestionsCache();
+          await loadData();
+      } else if (activeTab === 'records') {
+          clearResultsCache();
+          // Trigger re-fetch via effect or direct call
+          const { data, total } = await getPaginatedUserResults(currentPage, itemsPerPage, userSearchTerm);
+          setUserResults(data);
+          setTotalUserResults(total);
+      }
+      setIsLoading(false);
   };
 
   // Fetch User Results (Server-side Pagination)
@@ -280,7 +295,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                 {currentUser.role === UserRole.SUPER_ADMIN ? '超级管理员模式' : '普通管理员模式'}
             </p>
         </div>
-        <div className="flex space-x-2 bg-white p-1 rounded-lg border border-gray-200 shadow-sm overflow-x-auto max-w-full">
+        <div className="flex items-center space-x-2 bg-white p-1 rounded-lg border border-gray-200 shadow-sm overflow-x-auto max-w-full">
+          {(activeTab === 'list' || activeTab === 'records') && (
+            <Button
+              variant="ghost"
+              onClick={refreshData}
+              className="text-sm whitespace-nowrap px-2"
+              title="刷新数据"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </Button>
+          )}
           <Button 
             variant={activeTab === 'list' ? 'primary' : 'ghost'}
             onClick={() => setActiveTab('list')}

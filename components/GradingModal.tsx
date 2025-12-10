@@ -4,6 +4,7 @@ import { QuizResult, QuizAttempt } from '../types';
 import { gradeQuizResult } from '../services/storageService';
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
+import { useToast } from './Toast';
 
 interface GradingModalProps {
   result: QuizResult;
@@ -14,6 +15,7 @@ interface GradingModalProps {
 export const GradingModal: React.FC<GradingModalProps> = ({ result, onClose, onComplete }) => {
   const [attempts, setAttempts] = useState<QuizAttempt[]>(JSON.parse(JSON.stringify(result.attempts)));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { addToast } = useToast();
 
   const handleScoreChange = (index: number, newScore: string) => {
     const scoreNum = parseFloat(newScore);
@@ -42,7 +44,7 @@ export const GradingModal: React.FC<GradingModalProps> = ({ result, onClose, onC
       onComplete();
     } catch (error) {
       console.error('Failed to submit grading:', error);
-      alert('提交失败，请重试');
+      addToast('提交失败，请重试', 'error');
     } finally {
       setIsSubmitting(false);
     }

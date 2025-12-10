@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { QuizConfig, QuizPartConfig, Difficulty, QuestionType, GradeLevel, QuestionCategory } from '../types';
 import { getQuizConfigs, saveQuizConfig, deleteQuizConfig, getAvailableQuestionCount } from '../services/storageService';
 import { Button } from './Button';
+import { useToast } from './Toast';
 
 interface QuizConfigFormProps {
     onSave?: () => void;
@@ -39,6 +40,7 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
     const [activeConfig, setActiveConfig] = useState<QuizConfig | null>(null);
     const [availability, setAvailability] = useState<number[]>([]);
     const [isSaving, setIsSaving] = useState(false);
+    const { addToast } = useToast();
 
     useEffect(() => {
         loadConfigs();
@@ -184,14 +186,14 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
         // Calculate Max Score to validate passing score
         const maxScore = activeConfig.parts.reduce((sum, part) => sum + (part.count * part.score), 0);
         if (activeConfig.passingScore > maxScore) {
-            alert(`合格分数 (${activeConfig.passingScore}) 不能超过试卷满分 (${maxScore})。`);
+            addToast(`合格分数 (${activeConfig.passingScore}) 不能超过试卷满分 (${maxScore})。`, 'warning');
             return;
         }
 
         // Validate Inventory
         for (let i = 0; i < activeConfig.parts.length; i++) {
             if (activeConfig.parts[i].count > availability[i]) {
-                alert(`"${activeConfig.parts[i].name}" 请求的题目数量 (${activeConfig.parts[i].count}) 超过了题库中现有的符合条件题目数 (${availability[i]})。请调整配置。`);
+                addToast(`"${activeConfig.parts[i].name}" 请求的题目数量 (${activeConfig.parts[i].count}) 超过了题库中现有的符合条件题目数 (${availability[i]})。请调整配置。`, 'warning');
                 return;
             }
         }
@@ -200,7 +202,7 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
         // Update list specifically to reflect name changes etc.
         await loadConfigs();
         setIsSaving(false);
-        alert('试卷配置已保存！');
+        addToast('试卷配置已保存！', 'success');
         if (onSave) onSave();
     };
 

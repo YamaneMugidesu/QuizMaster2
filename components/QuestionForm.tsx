@@ -2,6 +2,7 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { Question, QuestionType, Difficulty, GradeLevel, QuestionCategory, SUBJECTS, QuestionFormData } from '../types';
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
+import { useToast } from './Toast';
 // import { RichTextEditor } from './RichTextEditor';
 
 // Lazy load RichTextEditor to prevent initial bundle crash if Quill fails
@@ -18,6 +19,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
   const [type, setType] = useState<QuestionType>(QuestionType.MULTIPLE_CHOICE);
   const [questionText, setQuestionText] = useState('');
   const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const { addToast } = useToast();
   
   // Options for Choice/Select questions
   const [optionA, setOptionA] = useState('');
@@ -156,7 +158,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
     if (type === QuestionType.MULTIPLE_SELECT) {
         finalCorrectAnswer = JSON.stringify(correctOptions.sort());
         if (correctOptions.length === 0) {
-            alert("请至少选择一个正确选项");
+            addToast("请至少选择一个正确选项", 'warning');
             return;
         }
     } else if (type === QuestionType.FILL_IN_THE_BLANK) {
@@ -165,7 +167,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
         // Let's save as JSON to handle rich text safely.
         finalCorrectAnswer = JSON.stringify(blankAnswers);
         if (blankAnswers.every(b => !b || b.trim() === '' || b === '<p><br></p>')) {
-             alert("请至少输入一个填空答案");
+             addToast("请至少输入一个填空答案", 'warning');
              return;
         }
     }

@@ -7,13 +7,16 @@ import { User, UserRole, QuizResult } from './types';
 import { Button } from './components/Button';
 import { loginUser, registerUser, saveQuizResult } from './services/storageService';
 import { supabase } from './services/supabaseClient';
+import { ToastProvider, useToast } from './components/Toast';
 
-const App: React.FC = () => {
+// Wrap the main content to use the useToast hook
+const MainContent: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [view, setView] = useState<'dashboard' | 'quiz' | 'result'>('dashboard');
   const [currentResult, setCurrentResult] = useState<QuizResult | null>(null);
   const [activeConfigId, setActiveConfigId] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const { addToast } = useToast();
 
   // Restore Session
   useEffect(() => {
@@ -68,7 +71,7 @@ const App: React.FC = () => {
              }
              const result = await registerUser(username, password);
              if (result.success) {
-                alert("注册成功！请登录。");
+                addToast("注册成功！请登录。", 'success');
                 setAuthMode('login');
                 setPassword('');
                 setConfirmPassword('');
@@ -272,6 +275,14 @@ const App: React.FC = () => {
         )}
       </main>
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <ToastProvider>
+      <MainContent />
+    </ToastProvider>
   );
 };
 

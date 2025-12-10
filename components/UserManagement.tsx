@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
 import { getAllUsers, adminAddUser, deleteUser, updateUserRole } from '../services/storageService';
 import { Button } from './Button';
+import { useToast } from './Toast';
 
 // Define the types of actions that require confirmation
 type ActionType = 'DELETE' | 'CHANGE_ROLE';
@@ -15,6 +16,7 @@ interface PendingAction {
 export const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const { addToast } = useToast();
   
   // New User Form State
   const [newUsername, setNewUsername] = useState('');
@@ -47,9 +49,9 @@ export const UserManagement: React.FC = () => {
       setNewRole(UserRole.USER);
       setIsAdding(false);
       await loadUsers();
-      alert('用户添加成功');
+      addToast('用户添加成功', 'success');
     } else {
-      alert(result.message);
+      addToast(result.message, 'error');
     }
   };
 
