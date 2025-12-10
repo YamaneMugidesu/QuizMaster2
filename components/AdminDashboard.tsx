@@ -159,6 +159,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       gradeLevel: data.gradeLevel,
       category: data.category,
       needsGrading: data.needsGrading,
+      explanation: data.explanation,
       createdAt: Date.now(),
       isDisabled: false
     };
@@ -181,12 +182,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       difficulty: data.difficulty,
       gradeLevel: data.gradeLevel,
       category: data.category,
-      needsGrading: data.needsGrading
+      needsGrading: data.needsGrading,
+      explanation: data.explanation
     };
     
     await updateQuestion(updatedQ);
     setEditingQuestion(null);
-    loadData();
+    refreshData();
   };
 
   const initiateDelete = (e: React.MouseEvent, id: string) => {
@@ -199,7 +201,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
     if (questionToDelete) {
       await deleteQuestion(questionToDelete);
       setQuestionToDelete(null);
-      loadData();
+      refreshData();
     }
   };
 
@@ -233,17 +235,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       if (recordToDelete) {
           try {
               await deleteQuizResult(recordToDelete);
-              // Refresh records
-              clearResultsCache();
-              loadData(); // This might be too broad, maybe separate loadRecords?
-              // Manually refresh records logic here since loadData is effect based
-              if (activeTab === 'records') {
-                  setIsLoading(true);
-                  const { data, total } = await getPaginatedUserResults(currentPage, itemsPerPage, userSearchTerm);
-                  setUserResults(data);
-                  setTotalUserResults(total);
-                  setIsLoading(false);
-              }
+              refreshData();
           } catch (error) {
               console.error('Failed to delete record:', error);
               alert('删除记录失败');
