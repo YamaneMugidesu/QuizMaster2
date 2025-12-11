@@ -92,7 +92,7 @@ export const GradingModal: React.FC<GradingModalProps> = ({ result, onClose, onC
                             
                             <div className="mb-3">
                                 <h4 className="font-medium text-gray-900 mb-1">题目:</h4>
-                                <p className="text-gray-800">{attempt.questionText}</p>
+                                <div className="text-gray-800 rich-text-content ql-editor" style={{ padding: 0 }} dangerouslySetInnerHTML={{ __html: attempt.questionText }} />
                                 {attempt.questionImageUrls && attempt.questionImageUrls.length > 0 && (
                                     <div className="flex gap-2 mt-2">
                                         {attempt.questionImageUrls.map((url, i) => (
@@ -105,11 +105,11 @@ export const GradingModal: React.FC<GradingModalProps> = ({ result, onClose, onC
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                                 <div className="bg-white p-3 rounded border border-gray-200">
                                     <h5 className="text-xs font-bold text-gray-500 uppercase mb-1">用户回答</h5>
-                                    <p className="text-gray-900 whitespace-pre-wrap">{attempt.userAnswer || '(未作答)'}</p>
+                                    <div className="text-gray-900 whitespace-pre-wrap break-words">{attempt.userAnswer || '(未作答)'}</div>
                                 </div>
                                 <div className="bg-green-50 p-3 rounded border border-green-100">
                                     <h5 className="text-xs font-bold text-green-700 uppercase mb-1">参考答案</h5>
-                                    <p className="text-green-900 whitespace-pre-wrap">{attempt.correctAnswerText}</p>
+                                    <div className="text-green-900 rich-text-content ql-editor" style={{ padding: 0 }} dangerouslySetInnerHTML={{ __html: attempt.correctAnswerText }} />
                                 </div>
                             </div>
 
