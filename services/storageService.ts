@@ -689,8 +689,15 @@ export const checkUserStatus = async (userId: string): Promise<boolean> => {
     .eq('id', userId)
     .single();
 
-  if (error || !data) {
-    return false;
+  // If there's an error (e.g. network issue), we assume the user is valid to prevent accidental logout
+  // We only return false if we explicitly get data saying the user is deleted or inactive
+  if (error) {
+    console.warn('Error checking user status, assuming active:', error);
+    return true; 
+  }
+
+  if (!data) {
+      return false; // User not found, should logout
   }
 
   // User is valid if NOT deleted AND IS active
