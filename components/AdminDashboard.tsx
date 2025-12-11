@@ -38,6 +38,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   const [filterGrade, setFilterGrade] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterDifficulty, setFilterDifficulty] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
 
   // Edit Modal State
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
@@ -63,7 +64,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                   subject: filterSubject,
                   gradeLevel: filterGrade as GradeLevel,
                   type: filterType as QuestionType,
-                  difficulty: filterDifficulty as Difficulty
+                  difficulty: filterDifficulty as Difficulty,
+                  category: filterCategory as QuestionCategory
               });
               setQuestions(data);
               setTotalQuestions(total);
@@ -76,7 +78,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
           
           return () => clearTimeout(timer);
       }
-  }, [activeTab, currentQuestionPage, searchTerm, filterSubject, filterGrade, filterType, filterDifficulty]);
+  }, [activeTab, currentQuestionPage, searchTerm, filterSubject, filterGrade, filterType, filterDifficulty, filterCategory]);
 
   const loadData = async () => {
     // Only load questions if we are in list mode - Handled by effect above
@@ -103,7 +105,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                 subject: filterSubject,
                 gradeLevel: filterGrade as GradeLevel,
                 type: filterType as QuestionType,
-                difficulty: filterDifficulty as Difficulty
+                difficulty: filterDifficulty as Difficulty,
+                category: filterCategory as QuestionCategory
           });
           setQuestions(data);
           setTotalQuestions(total);
@@ -144,7 +147,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   // Reset question pagination when searching/filtering
   useEffect(() => {
     setCurrentQuestionPage(1);
-  }, [activeTab, searchTerm, filterSubject, filterGrade, filterType, filterDifficulty]);
+  }, [activeTab, searchTerm, filterSubject, filterGrade, filterType, filterDifficulty, filterCategory]);
 
   const handleCreate = async (data: QuestionFormData) => {
     const newQ: Question = {
@@ -218,6 +221,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       setFilterGrade('');
       setFilterType('');
       setFilterDifficulty('');
+      setFilterCategory('');
   };
 
   const getTypeLabel = (t: QuestionType) => {
@@ -399,7 +403,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
         <div className="space-y-4 animate-fade-in">
             {/* Filter Bar */}
             <div className="bg-white rounded-xl shadow border border-gray-100 p-4">
-                <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
                     <div className="md:col-span-2">
                          <input 
                             type="text"
@@ -449,8 +453,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                         <option value={Difficulty.MEDIUM}>中等</option>
                         <option value={Difficulty.HARD}>困难</option>
                     </select>
+                    <select 
+                        className="px-3 py-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 text-sm bg-white"
+                        value={filterCategory}
+                        onChange={(e) => setFilterCategory(e.target.value)}
+                    >
+                        <option value="">所有分类</option>
+                        {Object.values(QuestionCategory).map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
                 </div>
-                {(searchTerm || filterSubject || filterGrade || filterType || filterDifficulty) && (
+                {(searchTerm || filterSubject || filterGrade || filterType || filterDifficulty || filterCategory) && (
                     <div className="mt-3 flex justify-between items-center text-sm">
                         <span className="text-gray-500">共找到 {totalQuestions} 个符合条件的题目</span>
                         <button onClick={resetFilters} className="text-primary-600 hover:text-primary-800 font-medium">清空筛选</button>

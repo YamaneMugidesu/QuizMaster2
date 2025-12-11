@@ -68,6 +68,7 @@ export interface QuestionFilters {
     gradeLevel?: GradeLevel;
     type?: QuestionType;
     difficulty?: Difficulty;
+    category?: QuestionCategory;
 }
 
 export const getQuestions = async (
@@ -96,6 +97,9 @@ export const getQuestions = async (
   }
   if (filters.difficulty) {
       query = query.eq('difficulty', filters.difficulty);
+  }
+  if (filters.category) {
+      query = query.eq('category', filters.category);
   }
 
   // Pagination
