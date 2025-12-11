@@ -106,6 +106,15 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
       return <div className="rich-text-content inline-block" dangerouslySetInnerHTML={{ __html: content }} />;
     };
 
+  // Helper to normalize HTML content for comparison
+  const normalizeHtml = (html: string) => {
+    if (!html) return '';
+    // Basic stripping of HTML tags
+    const text = html.replace(/<[^>]*>/g, '');
+    // Collapse whitespace
+    return text.replace(/\s+/g, ' ').trim();
+  };
+
   // Helper to get explanation, falling back to snapshot
   const getExplanation = (id: string, snapshot?: string) => {
     if (snapshot) return snapshot;
@@ -297,6 +306,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
              </div>
              <div className="divide-y divide-gray-100">
                  {localResult.attempts.map((attempt, idx) => {
+                     const qObj = allQuestions.find(q => String(q.id) === String(attempt.questionId));
                      const questionText = getQuestionText(attempt.questionId, attempt.questionText);
                      const correctTextRaw = getCorrectAnswerRaw(attempt.questionId, attempt.correctAnswerText);
                      const questionImages = getQuestionImages(attempt.questionId, attempt.questionImageUrls);
@@ -324,21 +334,104 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
                                         </span>}
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                                         <div className={`p-3 rounded-lg border ${attempt.isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                                             <span className="block text-xs uppercase font-bold opacity-70 mb-1">您的答案</span>
-                                             <div className="font-semibold break-words">
-                                                 {renderRichTextAnswer(attempt.userAnswer)}
-                                             </div>
-                                         </div>
-                                         {!attempt.isCorrect && (
-                                             <div className="p-3 rounded-lg border bg-gray-50 border-gray-200">
-                                                <span className="block text-xs uppercase font-bold text-gray-500 mb-1">正确答案</span>
-                                                <div className="font-semibold text-gray-800 break-words">
-                                                    {renderRichTextAnswer(correctTextRaw)}
+                                        {/* Only show boxed answer summary for non-choice questions (or deleted ones) */}
+                                        {(!qObj || (qObj.type !== QuestionType.MULTIPLE_CHOICE && qObj.type !== QuestionType.MULTIPLE_SELECT)) && (
+                                            <>
+                                                <div className={`p-3 rounded-lg border ${attempt.isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                                                    <span className="block text-xs uppercase font-bold opacity-70 mb-1">您的答案</span>
+                                                    <div className="font-semibold break-words">
+                                                        {renderRichTextAnswer(attempt.userAnswer)}
+                                                    </div>
                                                 </div>
-                                             </div>
-                                         )}
-                                     </div>
+                                                {!attempt.isCorrect && (
+                                                    <div className="p-3 rounded-lg border bg-gray-50 border-gray-200">
+                                                        <span className="block text-xs uppercase font-bold text-gray-500 mb-1">正确答案</span>
+                                                        <div className="font-semibold text-gray-800 break-words">
+                                                            {renderRichTextAnswer(correctTextRaw)}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+
+                                     {/* Options Review for Choice/Select */}
+                                     {qObj && (qObj.type === QuestionType.MULTIPLE_CHOICE || qObj.type === QuestionType.MULTIPLE_SELECT) && qObj.options && (
+                                        <div className="mt-4 space-y-2">
+                                            <div className="text-xs font-bold text-gray-500 uppercase">选项详情:</div>
+                                            {qObj.options.map((opt, i) => {
+                                                const label = String.fromCharCode(65 + i);
+                                                
+                                                // Determine selection status
+                                                let isSelected = false;
+                                                if (qObj.type === QuestionType.MULTIPLE_SELECT) {
+                                                    try {
+                                                        const userArr = JSON.parse(attempt.userAnswer || '[]');
+                                                        isSelected = userArr.includes(opt);
+                                                        // Fallback fuzzy match
+                                                        if (!isSelected) {
+                                                            const normOpt = normalizeHtml(opt);
+                                                            isSelected = userArr.some((u: string) => normalizeHtml(u) === normOpt);
+                                                        }
+                                                    } catch {}
+                                                } else {
+                                                    isSelected = attempt.userAnswer === opt;
+                                                    // Fallback fuzzy match
+                                                    if (!isSelected && attempt.userAnswer) {
+                                                        isSelected = normalizeHtml(attempt.userAnswer) === normalizeHtml(opt);
+                                                    }
+                                                }
+
+                                                // Determine correctness status
+                                                let isCorrectOption = false;
+                                                // Use snapshot correct answer if available to match grading logic
+                                                const correctText = attempt.correctAnswerText || qObj.correctAnswer;
+                                                if (qObj.type === QuestionType.MULTIPLE_SELECT) {
+                                                    try {
+                                                        const correctArr = JSON.parse(correctText || '[]');
+                                                        isCorrectOption = correctArr.includes(opt);
+                                                        // Fallback fuzzy match
+                                                        if (!isCorrectOption) {
+                                                            const normOpt = normalizeHtml(opt);
+                                                            isCorrectOption = correctArr.some((c: string) => normalizeHtml(c) === normOpt);
+                                                        }
+                                                    } catch {}
+                                                } else {
+                                                    isCorrectOption = correctText === opt;
+                                                    // Fallback fuzzy match
+                                                    if (!isCorrectOption && correctText) {
+                                                        isCorrectOption = normalizeHtml(correctText) === normalizeHtml(opt);
+                                                    }
+                                                }
+
+                                                let borderClass = "border-gray-200";
+                                                let bgClass = "bg-white";
+                                                let icon = null;
+
+                                                if (isSelected && isCorrectOption) {
+                                                    borderClass = "border-green-500";
+                                                    bgClass = "bg-green-50";
+                                                    icon = <span className="text-green-600 font-bold text-xs ml-auto">✓ 您的答案 (正确)</span>;
+                                                } else if (isSelected && !isCorrectOption) {
+                                                    borderClass = "border-red-500";
+                                                    bgClass = "bg-red-50";
+                                                    icon = <span className="text-red-600 font-bold text-xs ml-auto">✕ 您的答案 (错误)</span>;
+                                                } else if (isCorrectOption) {
+                                                    borderClass = "border-green-500";
+                                                    bgClass = "bg-white border-dashed"; 
+                                                    icon = <span className="text-green-600 font-bold text-xs ml-auto">✓ 正确答案</span>;
+                                                }
+
+                                                return (
+                                                    <div key={i} className={`flex items-center p-3 border rounded-lg ${borderClass} ${bgClass}`}>
+                                                        <span className="font-bold text-gray-500 mr-3">{label}.</span>
+                                                        <div className="rich-text-content flex-1" dangerouslySetInnerHTML={{ __html: opt }} />
+                                                        {icon}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                     )}
                                      
                                      <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-100 text-sm text-blue-800">
                                          <span className="font-bold mr-1">💡 解析:</span>

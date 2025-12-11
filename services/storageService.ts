@@ -283,6 +283,7 @@ export const generateQuiz = async (configId: string): Promise<{ questions: Quest
 
     const mappedConfig = mapConfigFromDB(config);
     let allQuestions: Question[] = [];
+    const usedQuestionIds = new Set<string>();
 
     for (const part of mappedConfig.parts) {
         let query = supabase.from('questions').select('*').eq('is_disabled', false).neq('is_deleted', true);
@@ -300,7 +301,11 @@ export const generateQuiz = async (configId: string): Promise<{ questions: Quest
         const { data: questions } = await query;
         
         if (questions) {
-            const mappedQuestions = questions.map(mapQuestionFromDB);
+            let mappedQuestions = questions.map(mapQuestionFromDB);
+            
+            // Filter out questions already used in previous parts
+            mappedQuestions = mappedQuestions.filter(q => !usedQuestionIds.has(q.id));
+
             // Shuffle and slice
             const shuffled = mappedQuestions.sort(() => 0.5 - Math.random());
             
@@ -320,6 +325,9 @@ export const generateQuiz = async (configId: string): Promise<{ questions: Quest
                         }
                     }
                 }
+
+                // Add to used set
+                usedQuestionIds.add(q.id);
 
                 return {
                     ...q,
@@ -445,6 +453,12 @@ const generateSafeEmail = (username: string): string => {
 };
 
 export const registerUser = async (username: string, password: string): Promise<{ success: boolean; message: string }> => {
+  // Check if registration is allowed
+  const allowRegistration = await getSystemSetting('allow_registration');
+  if (allowRegistration === 'false') {
+      return { success: false, message: '当前系统禁止新用户注册' };
+  }
+
   // Use safe email generation to support Chinese usernames
   const email = generateSafeEmail(username);
   
@@ -550,105 +564,116 @@ export const adminAddUser = async (username: string, password: string, role: Use
         return { success: false, message: '创建失败: ' + error.message };
     }
 
-    // RPC returns a JSON object with success and message
-    if (data && data.success) {
+    if (data.success) {
         return { success: true, message: '用户创建成功' };
     } else {
-        return { success: false, message: data?.message || '创建失败，未知错误' };
+        return { success: false, message: data.message || '创建失败' };
     }
 };
 
 export const deleteUser = async (userId: string): Promise<{ success: boolean; error?: any }> => {
-    // Soft delete: Mark the user as deleted instead of removing from DB
-    // This preserves the referential integrity for quiz results
-    const { error } = await supabase.from('profiles').update({ is_deleted: true }).eq('id', userId);
+    // Only SUPER_ADMIN can perform this via RLS or RPC, but here we use simple delete on profiles
+    // However, deleting from Auth is harder without Service Role. 
+    // We can use RPC admin_delete_user
+    
+    const { data, error } = await supabase.rpc('admin_delete_user', { user_id: userId });
     
     if (error) {
         console.error('Error deleting user:', error);
         return { success: false, error };
     }
-    return { success: true };
+    
+    if (data && data.success) {
+        return { success: true };
+    } else {
+        return { success: false, error: { message: data?.message || '删除失败' } };
+    }
 };
 
 export const updateUserRole = async (userId: string, newRole: UserRole): Promise<{ success: boolean; error?: any }> => {
+    // We can update public.profiles directly if RLS allows (Admins can update)
     const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
+    
     if (error) {
-        console.error('Error updating user role:', error);
         return { success: false, error };
     }
     return { success: true };
 };
 
-export const getAllUsers = async (): Promise<User[]> => {
-  const { data, error } = await supabase.from('profiles').select('*').neq('is_deleted', true);
-  if (error) return [];
-  return data.map((p: any) => ({
-    id: p.id,
-    username: p.username,
-    role: p.role as UserRole,
-    createdAt: p.created_at,
-    isActive: p.is_active
-  }));
+export const updateUserProfile = async (userId: string, updates: any): Promise<{ success: boolean; error?: any }> => {
+    // If password update is needed, we need RPC or Admin API.
+    // For now handle non-password updates
+    const { password, ...profileUpdates } = updates;
+    
+    // Update profile fields
+    const { error } = await supabase.from('profiles').update({
+        username: profileUpdates.username,
+        role: profileUpdates.role,
+        is_active: profileUpdates.isActive
+    }).eq('id', userId);
+
+    if (error) return { success: false, error };
+    
+    // Update password if provided
+    if (password) {
+        const { data, error: pwdError } = await supabase.rpc('admin_update_user_password', {
+            target_user_id: userId,
+            new_password: password
+        });
+        
+        if (pwdError) return { success: false, error: pwdError };
+        if (data && !data.success) return { success: false, error: { message: data.message } };
+    }
+    
+    return { success: true };
 };
 
 export const getPaginatedUsers = async (page: number, limit: number): Promise<{ data: User[]; total: number }> => {
     const from = (page - 1) * limit;
     const to = from + limit - 1;
-
+    
     const { data, count, error } = await supabase
         .from('profiles')
         .select('*', { count: 'exact' })
-        .neq('is_deleted', true)
         .order('created_at', { ascending: false })
         .range(from, to);
-
+        
     if (error) {
         console.error('Error fetching users:', error);
         return { data: [], total: 0 };
     }
-
-    const mapped = (data || []).map((p: any) => ({
+    
+    const mappedUsers: User[] = (data || []).map(p => ({
         id: p.id,
         username: p.username,
         role: p.role as UserRole,
         createdAt: p.created_at,
         isActive: p.is_active
     }));
-
-    return { data: mapped, total: count || 0 };
+    
+    return { data: mappedUsers, total: count || 0 };
 };
 
-export const updateUserProfile = async (userId: string, updates: { username?: string; role?: UserRole; isActive?: boolean; password?: string }): Promise<{ success: boolean; error?: any }> => {
-    const dbUpdates: any = {};
-    if (updates.username !== undefined) dbUpdates.username = updates.username;
-    if (updates.role !== undefined) dbUpdates.role = updates.role;
-    if (updates.isActive !== undefined) dbUpdates.is_active = updates.isActive;
+// --- SYSTEM SETTINGS API ---
 
-    // Update profile data
-    const { error: profileError } = await supabase.from('profiles').update(dbUpdates).eq('id', userId);
+export const getSystemSetting = async (key: string): Promise<string | null> => {
+    const { data, error } = await supabase.from('system_settings').select('value').eq('key', key).single();
+    if (error || !data) return null;
+    return data.value;
+};
+
+export const updateSystemSetting = async (key: string, value: string): Promise<{ success: boolean; message: string }> => {
+    const { error } = await supabase.from('system_settings').upsert({
+        key,
+        value,
+        updated_at: Date.now()
+    });
     
-    if (profileError) {
-        console.error('Error updating user profile:', profileError);
-        return { success: false, error: profileError };
+    if (error) {
+        console.error('Error updating setting:', error);
+        return { success: false, message: error.message };
     }
-
-    // Update password if provided
-    if (updates.password && updates.password.trim() !== '') {
-        const { error: passwordError } = await supabase.rpc('admin_update_user_password', {
-            target_user_id: userId,
-            new_password: updates.password
-        });
-
-        if (passwordError) {
-            console.error('Error updating user password:', passwordError);
-            // Return success but with password error? Or fail?
-            // Better to return failure or partial success. 
-            // For simplicity, we return the error.
-            return { success: false, error: passwordError };
-        }
-    }
-
-    return { success: true };
+    return { success: true, message: '设置更新成功' };
 };
 
 // --- RESULTS HISTORY ---

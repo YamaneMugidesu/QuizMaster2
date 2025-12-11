@@ -5,7 +5,7 @@ import { QuizResultView } from './components/QuizResult';
 import { UserDashboard } from './components/UserDashboard';
 import { User, UserRole, QuizResult } from './types';
 import { Button } from './components/Button';
-import { loginUser, registerUser, saveQuizResult, checkUserStatus } from './services/storageService';
+import { loginUser, registerUser, saveQuizResult, checkUserStatus, getSystemSetting } from './services/storageService';
 import { supabase } from './services/supabaseClient';
 import { ToastProvider, useToast } from './components/Toast';
 
@@ -16,6 +16,7 @@ const MainContent: React.FC = () => {
   const [currentResult, setCurrentResult] = useState<QuizResult | null>(null);
   const [activeConfigId, setActiveConfigId] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isRegistrationAllowed, setIsRegistrationAllowed] = useState(true);
   const { addToast } = useToast();
 
   // Periodically check user status
@@ -52,6 +53,13 @@ const MainContent: React.FC = () => {
       }
     };
     restoreSession();
+    
+    // Check registration setting
+    const checkSettings = async () => {
+        const val = await getSystemSetting('allow_registration');
+        setIsRegistrationAllowed(val !== 'false');
+    };
+    checkSettings();
   }, []);
 
   // Auth Form State
@@ -227,7 +235,13 @@ const MainContent: React.FC = () => {
 
           <div className="mt-6 text-sm text-gray-500">
              {authMode === 'login' ? (
-                 <>还没有账号？ <button onClick={() => { setAuthMode('register'); setAuthError(''); }} className="text-primary-600 font-bold hover:underline">立即注册</button></>
+                 <>
+                    {isRegistrationAllowed ? (
+                        <>还没有账号？ <button onClick={() => { setAuthMode('register'); setAuthError(''); }} className="text-primary-600 font-bold hover:underline">立即注册</button></>
+                    ) : (
+                        <span className="text-gray-400">目前暂不开放注册，请联系管理员</span>
+                    )}
+                 </>
              ) : (
                  <>已有账号？ <button onClick={() => { setAuthMode('login'); setAuthError(''); }} className="text-primary-600 font-bold hover:underline">去登录</button></>
              )}

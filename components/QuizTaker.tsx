@@ -339,7 +339,12 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
                             onChange={(e) => handleAnswerChange(e.target.value)}
                             className="h-5 w-5 text-primary-600 border-gray-300 focus:ring-primary-500"
                           />
-                          <span className="ml-3 font-medium text-gray-700 rich-text-content" dangerouslySetInnerHTML={{ __html: opt }} />
+                          <div className="ml-3 flex items-start">
+                            {currentQ.type === QuestionType.MULTIPLE_CHOICE && (
+                                <span className="font-bold mr-2 mt-0.5">{String.fromCharCode(65 + idx)}.</span>
+                            )}
+                            <span className="font-medium text-gray-700 rich-text-content" dangerouslySetInnerHTML={{ __html: opt }} />
+                          </div>
                       </label>
                   ))}
                </div>
@@ -359,7 +364,10 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
                                     onChange={() => handleMultiSelectChange(opt)}
                                     className="h-5 w-5 text-primary-600 border-gray-300 focus:ring-primary-500 rounded"
                                 />
-                                <span className="ml-3 font-medium text-gray-700 rich-text-content" dangerouslySetInnerHTML={{ __html: opt }} />
+                                <div className="ml-3 flex items-start">
+                                    <span className="font-bold mr-2 mt-0.5">{String.fromCharCode(65 + idx)}.</span>
+                                    <span className="font-medium text-gray-700 rich-text-content" dangerouslySetInnerHTML={{ __html: opt }} />
+                                </div>
                             </label>
                         )
                     })}

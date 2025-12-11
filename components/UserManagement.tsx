@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
-import { getPaginatedUsers, adminAddUser, deleteUser, updateUserRole, updateUserProfile } from '../services/storageService';
+import { getPaginatedUsers, adminAddUser, deleteUser, updateUserRole, updateUserProfile, getSystemSetting, updateSystemSetting } from '../services/storageService';
 import { Button } from './Button';
 import { useToast } from './Toast';
 
@@ -44,9 +44,32 @@ export const UserManagement: React.FC = () => {
   // Modal State for Confirmation
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
 
+  // System Settings State
+  const [allowRegistration, setAllowRegistration] = useState<boolean>(true);
+
   useEffect(() => {
     loadUsers();
   }, [currentPage]);
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+      const val = await getSystemSetting('allow_registration');
+      setAllowRegistration(val !== 'false');
+  };
+
+  const handleToggleRegistration = async () => {
+      const newValue = !allowRegistration;
+      const { success, message } = await updateSystemSetting('allow_registration', String(newValue));
+      if (success) {
+          setAllowRegistration(newValue);
+          addToast(`已${newValue ? '开启' : '关闭'}新用户注册功能`, 'success');
+      } else {
+          addToast(message, 'error');
+      }
+  };
 
   const loadUsers = async () => {
     setLoading(true);
@@ -189,6 +212,30 @@ export const UserManagement: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in relative">
       
+      {/* System Settings Section */}
+      <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 flex justify-between items-center">
+        <div>
+            <h3 className="text-lg font-bold text-gray-800">系统设置</h3>
+            <p className="text-sm text-gray-500">控制系统的全局配置</p>
+        </div>
+        <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-gray-700">允许新用户注册</span>
+            <button 
+                onClick={handleToggleRegistration}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    allowRegistration ? 'bg-primary-600' : 'bg-gray-200'
+                }`}
+            >
+                <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        allowRegistration ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                />
+            </button>
+        </div>
+      </div>
+
       {/* Add User Section */}
       <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100">
         <div className="flex justify-between items-center mb-4">

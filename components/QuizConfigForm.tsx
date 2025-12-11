@@ -9,7 +9,7 @@ interface QuizConfigFormProps {
     onSave?: () => void;
 }
 
-const SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '地理', '政治', '历史'];
+const SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '地理', '政治', '历史', '综合'];
 const GRADES = [
     { label: '小学', value: GradeLevel.PRIMARY },
     { label: '初中', value: GradeLevel.JUNIOR },

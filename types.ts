@@ -109,7 +109,7 @@ export interface QuizPartConfig {
 }
 
 // --- Shared Constants ---
-export const SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '地理', '政治', '历史'];
+export const SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '地理', '政治', '历史', '综合'];
 
 export interface QuestionFormData {
   type: QuestionType;

@@ -89,3 +89,29 @@ $$ language plpgsql security definer;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- 8. System Settings Table
+create table if not exists public.system_settings (
+  key text primary key,
+  value text,
+  updated_at bigint
+);
+
+alter table public.system_settings enable row level security;
+
+-- Allow read access for everyone (so login page can check if registration is allowed)
+create policy "Read access for all" on public.system_settings for select using (true);
+
+-- Allow write access only for admins (SUPER_ADMIN and ADMIN)
+create policy "Write access for admins" on public.system_settings for all using (
+  exists (
+    select 1 from public.profiles
+    where profiles.id = auth.uid()
+    and profiles.role in ('SUPER_ADMIN', 'ADMIN')
+  )
+);
+
+-- Insert default value for registration (enabled by default)
+insert into public.system_settings (key, value, updated_at)
+values ('allow_registration', 'true', extract(epoch from now()) * 1000)
+on conflict (key) do nothing;

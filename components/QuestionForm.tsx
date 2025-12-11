@@ -22,10 +22,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
   const { addToast } = useToast();
   
   // Options for Choice/Select questions
-  const [optionA, setOptionA] = useState('');
-  const [optionB, setOptionB] = useState('');
-  const [optionC, setOptionC] = useState('');
-  const [optionD, setOptionD] = useState('');
+  const [options, setOptions] = useState<string[]>(['', '', '', '']);
   
   // Answer handling
   const [correctAnswer, setCorrectAnswer] = useState(''); // Single value for basic types
@@ -56,10 +53,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
       setExplanation(initialData.explanation || '');
       
       if ((initialData.type === QuestionType.MULTIPLE_CHOICE || initialData.type === QuestionType.MULTIPLE_SELECT) && initialData.options) {
-        setOptionA(initialData.options[0] || '');
-        setOptionB(initialData.options[1] || '');
-        setOptionC(initialData.options[2] || '');
-        setOptionD(initialData.options[3] || '');
+        setOptions(initialData.options.length > 0 ? initialData.options : ['', '', '', '']);
       }
 
       if (initialData.type === QuestionType.MULTIPLE_SELECT) {
@@ -143,6 +137,36 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
       });
   };
 
+  const addOption = () => {
+    setOptions([...options, '']);
+  };
+
+  const removeOption = (index: number) => {
+    if (options.length <= 2) {
+        addToast("至少需要两个选项", 'warning');
+        return;
+    }
+    const newOptions = [...options];
+    const removedOption = newOptions[index];
+    newOptions.splice(index, 1);
+    setOptions(newOptions);
+    
+    // Also remove from correct answers if selected
+    if (type === QuestionType.MULTIPLE_CHOICE) {
+        if (correctAnswer === removedOption) setCorrectAnswer('');
+    } else if (type === QuestionType.MULTIPLE_SELECT) {
+        if (correctOptions.includes(removedOption)) {
+            setCorrectOptions(prev => prev.filter(o => o !== removedOption));
+        }
+    }
+  };
+
+  const updateOption = (index: number, val: string) => {
+      const newOptions = [...options];
+      newOptions[index] = val;
+      setOptions(newOptions);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -157,17 +181,16 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
 
     // 2. Validate Options (for Choice questions)
     if (type === QuestionType.MULTIPLE_CHOICE || type === QuestionType.MULTIPLE_SELECT) {
-        if (!optionA || stripHtml(optionA) === '') {
-             addToast("请输入选项 A 的内容", 'warning');
-             return;
+        if (options.length < 2) {
+            addToast("请至少设置两个选项", 'warning');
+            return;
         }
-        if (!optionB || stripHtml(optionB) === '') {
-             addToast("请输入选项 B 的内容", 'warning');
-             return;
+        for (let i = 0; i < options.length; i++) {
+            if (!options[i] || stripHtml(options[i]) === '') {
+                addToast(`请输入选项 ${String.fromCharCode(65 + i)} 的内容`, 'warning');
+                return;
+            }
         }
-        // Ideally we might want to allow 2-4 options, but currently UI enforces 4 inputs. 
-        // We'll just enforce A and B for now to allow 2-option questions if desired, 
-        // though the UI renders 4 slots.
     }
 
     // 3. Validate Correct Answer
@@ -202,18 +225,18 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
         }
     }
 
-    let options: string[] = [];
+    let finalOptions: string[] = [];
     if (type === QuestionType.MULTIPLE_CHOICE || type === QuestionType.MULTIPLE_SELECT) {
-      options = [optionA, optionB, optionC, optionD];
+      finalOptions = [...options];
     } else if (type === QuestionType.TRUE_FALSE) {
-      options = ['正确', '错误'];
+      finalOptions = ['正确', '错误'];
     }
 
     onSubmit({
       type,
       text: questionText,
       imageUrls,
-      options,
+      options: finalOptions,
       correctAnswer: finalCorrectAnswer,
       subject,
       difficulty,
@@ -231,10 +254,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
   const resetForm = () => {
     setQuestionText('');
     setImageUrls([]);
-    setOptionA('');
-    setOptionB('');
-    setOptionC('');
-    setOptionD('');
+    setOptions(['', '', '', '']);
     setCorrectAnswer('');
     setCorrectOptions([]);
     setBlankAnswers(['']);
@@ -394,38 +414,60 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {[
-                        { val: optionA, set: setOptionA, label: 'A' },
-                        { val: optionB, set: setOptionB, label: 'B' },
-                        { val: optionC, set: setOptionC, label: 'C' },
-                        { val: optionD, set: setOptionD, label: 'D' }
-                    ].map((opt, i) => (
-                        <div key={i} className="flex flex-col gap-2">
-                            <span className="font-bold text-gray-500">选项 {opt.label}</span>
+                    {options.map((optVal, i) => {
+                        const label = String.fromCharCode(65 + i);
+                        return (
+                        <div key={i} className="flex flex-col gap-2 relative">
+                            <div className="flex justify-between items-center">
+                                <span className="font-bold text-gray-500">选项 {label}</span>
+                                {options.length > 2 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => removeOption(i)}
+                                        className="text-red-500 hover:text-red-700 text-xs"
+                                    >
+                                        删除
+                                    </button>
+                                )}
+                            </div>
                             <Suspense fallback={<div className="h-32 w-full bg-gray-100 animate-pulse rounded-md">Loading...</div>}>
                                 <RichTextEditor 
-                                    value={opt.val}
-                                    onChange={opt.set}
-                                    placeholder={`请输入选项 ${opt.label} 内容`}
+                                    value={optVal}
+                                    onChange={(val) => updateOption(i, val)}
+                                    placeholder={`请输入选项 ${label} 内容`}
                                 />
                             </Suspense>
                             {type === QuestionType.MULTIPLE_SELECT && (
                                 <div className="flex items-center mt-2">
                                     <input 
                                         type="checkbox" 
-                                        id={`correct-${opt.label}`}
-                                        checked={correctOptions.includes(opt.val) && opt.val !== ''}
-                                        disabled={!opt.val}
-                                        onChange={() => toggleCorrectOption(opt.val)}
+                                        id={`correct-${label}`}
+                                        checked={correctOptions.includes(optVal) && optVal !== ''}
+                                        disabled={!optVal}
+                                        onChange={() => toggleCorrectOption(optVal)}
                                         className="w-5 h-5 text-primary-600 rounded focus:ring-primary-500"
                                     />
-                                    <label htmlFor={`correct-${opt.label}`} className="ml-2 text-sm text-gray-700 cursor-pointer">
+                                    <label htmlFor={`correct-${label}`} className="ml-2 text-sm text-gray-700 cursor-pointer">
                                         设为正确答案
                                     </label>
                                 </div>
                             )}
                         </div>
-                    ))}
+                    )})}
+                </div>
+                
+                <div className="mt-4">
+                    <Button 
+                        type="button" 
+                        variant="secondary"
+                        onClick={addOption}
+                        className="w-full border-dashed border-2 border-gray-300 text-gray-500 hover:border-primary-500 hover:text-primary-500 flex justify-center items-center gap-2"
+                    >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        添加选项
+                    </Button>
                 </div>
             </div>
           )}
@@ -455,10 +497,13 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
                 >
                     <option value="">请选择正确选项...</option>
                     {/* Render options stripped of HTML tags for readability in dropdown */}
-                    {optionA && <option value={optionA}>A: {optionA.replace(/<[^>]+>/g, '')}</option>}
-                    {optionB && <option value={optionB}>B: {optionB.replace(/<[^>]+>/g, '')}</option>}
-                    {optionC && <option value={optionC}>C: {optionC.replace(/<[^>]+>/g, '')}</option>}
-                    {optionD && <option value={optionD}>D: {optionD.replace(/<[^>]+>/g, '')}</option>}
+                    {options.map((optVal, i) => {
+                        const label = String.fromCharCode(65 + i);
+                        if (!optVal) return null;
+                        return (
+                            <option key={i} value={optVal}>{label}: {optVal.replace(/<[^>]+>/g, '')}</option>
+                        );
+                    })}
                 </select>
             )}
 
