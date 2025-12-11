@@ -29,6 +29,7 @@ export const ImageWithPreview: React.FC<ImageWithPreviewProps> = ({ className, p
     return (
         <>
             <img 
+                loading="lazy"
                 {...props} 
                 className={`${className || ''} cursor-zoom-in transition-opacity hover:opacity-90`} 
                 onClick={handleClick} 

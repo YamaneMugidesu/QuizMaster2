@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { QuizResult, Question, QuestionType, QuizConfig, QuizPartConfig } from '../types';
-import { getQuizConfig, gradeQuizResult, getAllQuestionsRaw } from '../services/storageService';
+import { getQuizConfig, gradeQuizResult, getQuestionsByIds } from '../services/storageService';
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
 import { useToast } from './Toast';
@@ -24,9 +24,17 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
 
   useEffect(() => {
       const load = async () => {
-          // We need to know if questions are deleted, and to get explanations if not in snapshot
-          const questions = await getAllQuestionsRaw();
-          setAllQuestions(questions);
+          // Optimization: Only fetch questions relevant to this result
+          const questionIds = result.attempts.map(a => a.questionId);
+          // Remove duplicates
+          const uniqueIds = Array.from(new Set(questionIds));
+          
+          if (uniqueIds.length > 0) {
+              const questions = await getQuestionsByIds(uniqueIds);
+              setAllQuestions(questions);
+          } else {
+              setAllQuestions([]);
+          }
 
           if (!config && result.configId) {
               const conf = await getQuizConfig(result.configId);
@@ -36,7 +44,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
           setIsLoading(false);
       };
       load();
-  }, [result.configId]);
+  }, [result.configId, result.attempts]); // Add result.attempts to dependency
 
   // Sync local result if prop changes (though unlikely in this flow)
   useEffect(() => {

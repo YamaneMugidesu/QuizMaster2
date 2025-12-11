@@ -4,7 +4,6 @@ import { Question, QuestionType, QuizAttempt, QuizResult } from '../types';
 import { generateQuiz, gradeQuiz } from '../services/storageService';
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
-import { RichTextEditor } from './RichTextEditor';
 import { useToast } from './Toast';
 
 const STORAGE_KEY_PREFIX = 'quiz_autosave_';
@@ -15,11 +14,12 @@ interface SavedSession {
   configName: string;
   passingScore: number;
   timestamp: number;
+  startTime?: number;
 }
 
 interface QuizTakerProps {
   configId: string;
-  onComplete: (result: QuizResult) => void;
+  onComplete: (result: QuizResult) => Promise<void>;
   onExit: () => void;
 }
 
@@ -48,6 +48,9 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
                     setConfigName(saved.configName);
                     setPassingScore(saved.passingScore);
                     setAnswers(saved.answers || {});
+                    if (saved.startTime) {
+                        startTime.current = saved.startTime;
+                    }
                     setIsLoading(false);
                     addToast('已恢复上次未完成的答题进度', 'info');
                     return;
@@ -76,14 +79,35 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
               answers,
               configName,
               passingScore,
-              timestamp: Date.now()
+              timestamp: Date.now(),
+              startTime: startTime.current
           };
           localStorage.setItem(STORAGE_KEY_PREFIX + configId, JSON.stringify(session));
       }
   }, [answers, questions, configName, passingScore, isLoading, configId]);
 
+  // Prevent accidental exit
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!isSubmitting && questions.length > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isSubmitting, questions.length]);
+
   const clearAutoSave = () => {
       localStorage.removeItem(STORAGE_KEY_PREFIX + configId);
+  };
+
+  const handleExit = () => {
+      if (window.confirm('确定要放弃本次答题吗？您的进度将被清除。')) {
+          clearAutoSave();
+          onExit();
+      }
   };
 
   const handleAnswerChange = (value: string) => {
@@ -211,9 +235,16 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
       duration: Math.floor((Date.now() - startTime.current) / 1000) // Duration in seconds
     };
 
-    clearAutoSave();
-    onComplete(result);
-    setIsSubmitting(false);
+    try {
+        await onComplete(result);
+        clearAutoSave();
+    } catch (error) {
+        console.error("Failed to complete quiz submission", error);
+        // Toast is likely handled by onComplete, but we can add one here if needed
+        // or just ensure we don't clearAutoSave
+    } finally {
+        setIsSubmitting(false);
+    }
   };
 
   const getTypeLabel = (t: QuestionType) => {
@@ -427,7 +458,7 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
       </div>
       
       <div className="mt-4 text-center">
-        <button onClick={onExit} className="text-gray-400 hover:text-gray-600 text-sm underline">放弃并退出</button>
+        <button onClick={handleExit} className="text-gray-400 hover:text-gray-600 text-sm underline">放弃并退出</button>
       </div>
     </div>
   );

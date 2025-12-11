@@ -41,14 +41,26 @@ const MainContent: React.FC = () => {
     const restoreSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
-          const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+          const { data: profile, error: profileError } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
           if (profile) {
               setUser({
                   id: profile.id,
                   username: profile.username,
                   role: profile.role as UserRole,
-                  createdAt: profile.created_at
+                  createdAt: new Date(profile.created_at).getTime()
               });
+          } else if (profileError) {
+              // Fallback to metadata on error
+              console.warn('Profile restore failed, using metadata fallback', profileError);
+              const metadata = session.user.user_metadata;
+              if (metadata && metadata.username) {
+                   setUser({
+                      id: session.user.id,
+                      username: metadata.username,
+                      role: (metadata.role as UserRole) || UserRole.USER,
+                      createdAt: new Date(session.user.created_at).getTime()
+                  });
+              }
           }
       }
     };
