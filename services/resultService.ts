@@ -295,8 +295,12 @@ export const gradeQuiz = async (attempts: { questionId: string; userAnswer: stri
           }
       } else {
           // Short Answer Auto-Grade
-          const cleanCorrectAnswer = (q.correctAnswer || '').replace(/<[^>]+>/g, '').trim().toLowerCase();
-          const cleanUserAnswer = userAnswer.trim().toLowerCase();
+          // Normalize whitespace: replace newlines and multiple spaces with a single space
+          const normalize = (str: string) => str.replace(/\s+/g, ' ').trim().toLowerCase();
+          
+          const cleanCorrectAnswer = normalize((q.correctAnswer || '').replace(/<[^>]+>/g, ''));
+          const cleanUserAnswer = normalize(userAnswer);
+          
           isCorrect = cleanUserAnswer === cleanCorrectAnswer;
       }
   

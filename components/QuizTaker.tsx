@@ -420,9 +420,8 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
                 </div>
             ) : (
                 <div className="mt-2">
-                    <input 
-                        type="text" 
-                        className="w-full p-4 border-2 border-gray-200 rounded-xl focus:border-primary-500 focus:ring-0 outline-none text-lg"
+                    <textarea 
+                        className="w-full p-4 border-2 border-gray-200 rounded-xl focus:border-primary-500 focus:ring-0 outline-none text-lg min-h-[150px] resize-y"
                         placeholder="在此输入简答题答案..."
                         value={currentAnswer}
                         onChange={(e) => handleAnswerChange(e.target.value)}

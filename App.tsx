@@ -203,22 +203,24 @@ const MainContent: React.FC = () => {
                      {authError}
                  </div>
              )}
-             <div>
+             <div key="username-field">
                  <label className="block text-sm font-medium text-gray-700 mb-1">用户名</label>
                  <input 
                     type="text" 
                     required
+                    autoComplete="username"
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:outline-none"
                     value={username}
                     onChange={e => setUsername(e.target.value)}
                     placeholder="请输入用户名"
                  />
              </div>
-             <div>
+             <div key="password-field">
                  <label className="block text-sm font-medium text-gray-700 mb-1">密码</label>
                  <input 
                     type="password" 
                     required
+                    autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:outline-none"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
@@ -226,19 +228,22 @@ const MainContent: React.FC = () => {
                  />
              </div>
              
-             {authMode === 'register' && (
-                <div className="animate-fade-in">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">确认密码</label>
-                    <input 
-                        type="password" 
-                        required
-                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:outline-none"
-                        value={confirmPassword}
-                        onChange={e => setConfirmPassword(e.target.value)}
-                        placeholder="请再次输入密码"
-                    />
-                </div>
-             )}
+             <div key="confirm-field-container">
+                 {authMode === 'register' && (
+                    <div className="animate-fade-in">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">确认密码</label>
+                        <input 
+                            type="password" 
+                            required
+                            autoComplete="new-password"
+                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:outline-none"
+                            value={confirmPassword}
+                            onChange={e => setConfirmPassword(e.target.value)}
+                            placeholder="请再次输入密码"
+                        />
+                    </div>
+                 )}
+             </div>
 
              <Button type="submit" className="w-full justify-center mt-4" isLoading={isProcessing}>
                  {authMode === 'login' ? '登录' : '注册'}
