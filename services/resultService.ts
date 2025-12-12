@@ -295,8 +295,14 @@ export const gradeQuiz = async (attempts: { questionId: string; userAnswer: stri
           }
       } else {
           // Short Answer Auto-Grade
-          // Normalize whitespace: replace newlines and multiple spaces with a single space
-          const normalize = (str: string) => str.replace(/\s+/g, ' ').trim().toLowerCase();
+          // Normalize whitespace: 
+          // 1. Replace newlines and multiple spaces with a single space
+          // 2. Remove spaces between Chinese characters (to handle user-added newlines in Chinese text correctly)
+          const normalize = (str: string) => {
+              let s = str.replace(/\s+/g, ' ').trim().toLowerCase();
+              // Remove spaces between Chinese characters
+              return s.replace(/([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])/g, '$1$2');
+          };
           
           const cleanCorrectAnswer = normalize((q.correctAnswer || '').replace(/<[^>]+>/g, ''));
           const cleanUserAnswer = normalize(userAnswer);

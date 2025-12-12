@@ -555,7 +555,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                                         })()}
                                     </div>
                                 ) : (
-                                    <div className="font-semibold text-green-600 ml-1 rich-text-content inline-block truncate max-w-lg" dangerouslySetInnerHTML={{ __html: q.correctAnswer }} />
+                                    <div 
+                                        className="font-semibold text-green-600 ml-1 rich-text-content flex-1 min-w-0 break-words line-clamp-2" 
+                                        style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                                        dangerouslySetInnerHTML={{ __html: q.correctAnswer }} 
+                                    />
                                 )}
                             </div>
                         </div>
