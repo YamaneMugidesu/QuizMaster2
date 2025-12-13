@@ -108,6 +108,15 @@ export interface QuizPartConfig {
   score: number; // Points per question in this part
 }
 
+export interface QuestionFilters {
+  search?: string;
+  subject?: string;
+  gradeLevel?: GradeLevel;
+  type?: QuestionType;
+  difficulty?: Difficulty;
+  category?: QuestionCategory;
+}
+
 // --- Shared Constants ---
 export const SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '地理', '政治', '历史', '综合'];
 

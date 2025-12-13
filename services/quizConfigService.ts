@@ -1,6 +1,6 @@
 import { supabase } from './supabaseClient';
 import { QuizConfig, Question, QuestionType } from '../types';
-import { mapQuestionFromDB } from './questionService';
+import { mapQuestionFromDB, getQuestionsByIds } from './questionService';
 
 // Internal DB Type
 interface DBConfig {
@@ -28,19 +28,11 @@ const mapConfigFromDB = (c: DBConfig): QuizConfig => ({
 });
 
 // --- STATE ---
-let quizConfigsCache: { data: QuizConfig[]; timestamp: number } | null = null;
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
-export const clearQuizConfigsCache = () => { quizConfigsCache = null; };
+// Removed manual cache variables
 
 // --- API ---
 
 export const getQuizConfigs = async (): Promise<QuizConfig[]> => {
-  // Check cache
-  if (quizConfigsCache && (Date.now() - quizConfigsCache.timestamp < CACHE_TTL)) {
-    return quizConfigsCache.data;
-  }
-
   const { data, error } = await supabase.from('quiz_configs').select('*').neq('is_deleted', true);
   if (error) {
     console.error('Error fetching configs:', error);
@@ -48,8 +40,6 @@ export const getQuizConfigs = async (): Promise<QuizConfig[]> => {
   }
   
   const mapped = (data || []).map(item => mapConfigFromDB(item as DBConfig));
-  // Update cache
-  quizConfigsCache = { data: mapped, timestamp: Date.now() };
   return mapped;
 };
 
@@ -63,7 +53,6 @@ export const getQuizConfig = async (id: string): Promise<QuizConfig | null> => {
 };
 
 export const saveQuizConfig = async (config: QuizConfig): Promise<void> => {
-  quizConfigsCache = null; // Invalidate cache
   const { id, ...rest } = config;
   const dbPayload = {
     name: rest.name,
@@ -86,13 +75,11 @@ export const saveQuizConfig = async (config: QuizConfig): Promise<void> => {
 };
 
 export const deleteQuizConfig = async (id: string): Promise<void> => {
-    quizConfigsCache = null; // Invalidate cache
     // Soft delete
     await supabase.from('quiz_configs').update({ is_deleted: true }).eq('id', id);
 }
 
 export const toggleQuizConfigVisibility = async (id: string): Promise<void> => {
-    quizConfigsCache = null;
     const { data } = await supabase.from('quiz_configs').select('is_published').eq('id', id).single();
     if (data) {
         await supabase.from('quiz_configs').update({ is_published: !data.is_published }).eq('id', id);
@@ -107,67 +94,94 @@ export const generateQuiz = async (configId: string): Promise<{ questions: Quest
     }
 
     const mappedConfig = mapConfigFromDB(config as DBConfig);
-    let allQuestions: Question[] = [];
-    const usedQuestionIds = new Set<string>();
-
-    for (const part of mappedConfig.parts) {
-        let query = supabase.from('questions').select('*').eq('is_disabled', false).neq('is_deleted', true);
+    
+    // 1. Parallel Fetch of Potential IDs for all parts
+    const partPromises = mappedConfig.parts.map(async (part) => {
+        let query = supabase.from('questions').select('id').eq('is_disabled', false).neq('is_deleted', true);
         
         if (part.subjects && part.subjects.length > 0) query = query.in('subject', part.subjects);
         if (part.difficulties && part.difficulties.length > 0) query = query.in('difficulty', part.difficulties);
         if (part.gradeLevels && part.gradeLevels.length > 0) query = query.in('grade_level', part.gradeLevels);
         if (part.categories && part.categories.length > 0) query = query.in('category', part.categories);
         
-        // Fix: Use questionTypes (from interface) instead of types
-        // Also support 'types' for backward compatibility if it exists in DB
+        // Support both 'questionTypes' (new) and 'types' (legacy)
         const types = (part as any).questionTypes || (part as any).types;
         if (types && types.length > 0) query = query.in('type', types);
 
-        const { data: questions } = await query;
-        
-        if (questions) {
-            let mappedQuestions = (questions as any[]).map(mapQuestionFromDB);
-            
-            // Filter out questions already used in previous parts
-            mappedQuestions = mappedQuestions.filter(q => !usedQuestionIds.has(q.id));
+        const { data } = await query;
+        return { part, candidateIds: data ? data.map(q => q.id) : [] };
+    });
 
-            // Shuffle and slice
-            const shuffled = mappedQuestions.sort(() => 0.5 - Math.random());
-            
-            // Apply score from config part
-            const selectedQuestions = shuffled.slice(0, part.count).map(q => {
-                let blankCount = undefined;
-                if (q.type === QuestionType.FILL_IN_THE_BLANK) {
-                    try {
-                        const parsed = JSON.parse(q.correctAnswer);
-                        if (Array.isArray(parsed)) blankCount = parsed.length;
-                        else blankCount = 1;
-                    } catch {
-                        if (q.correctAnswer && q.correctAnswer.includes(';&&;')) {
-                            blankCount = q.correctAnswer.split(';&&;').length;
-                        } else {
-                            blankCount = 1;
-                        }
+    const results = await Promise.all(partPromises);
+
+    // 2. In-memory Selection (Sequential to handle duplicates across parts)
+    const usedQuestionIds = new Set<string>();
+    const orderedQuestionIds: string[] = [];
+    const questionPartMap = new Map<string, any>(); // Map ID to Part Config
+
+    for (const { part, candidateIds } of results) {
+        // Filter used
+        const availableIds = candidateIds.filter((id: string) => !usedQuestionIds.has(id));
+        
+        // Shuffle
+        const shuffled = availableIds.sort(() => 0.5 - Math.random());
+        
+        // Slice
+        const selected = shuffled.slice(0, part.count);
+        
+        selected.forEach((id: string) => {
+            usedQuestionIds.add(id);
+            orderedQuestionIds.push(id);
+            questionPartMap.set(id, part);
+        });
+    }
+
+    if (orderedQuestionIds.length === 0) {
+        return { questions: [], configName: mappedConfig.name, passingScore: mappedConfig.passingScore };
+    }
+
+    // 3. Batch Fetch Details
+    const questions = await getQuestionsByIds(orderedQuestionIds);
+
+    // 4. Map back to result structure (restore order and apply part settings)
+    const finalQuestions: Question[] = [];
+    
+    // Create a lookup map for fetched questions
+    const fetchedQuestionsMap = new Map<string, Question>();
+    questions.forEach(q => fetchedQuestionsMap.set(q.id, q));
+
+    // Iterate through ordered IDs to maintain order and apply specific part settings
+    for (const id of orderedQuestionIds) {
+        const q = fetchedQuestionsMap.get(id);
+        const part = questionPartMap.get(id);
+
+        if (q && part) {
+            let blankCount = undefined;
+            if (q.type === QuestionType.FILL_IN_THE_BLANK) {
+                try {
+                    const parsed = JSON.parse(q.correctAnswer);
+                    if (Array.isArray(parsed)) blankCount = parsed.length;
+                    else blankCount = 1;
+                } catch {
+                    if (q.correctAnswer && q.correctAnswer.includes(';&&;')) {
+                        blankCount = q.correctAnswer.split(';&&;').length;
+                    } else {
+                        blankCount = 1;
                     }
                 }
+            }
 
-                // Add to used set
-                usedQuestionIds.add(q.id);
-
-                return {
-                    ...q,
-                    score: part.score, // Override question score with config part score
-                    correctAnswer: '', // SECURITY: Clear correct answer for client
-                    blankCount: blankCount
-                };
+            finalQuestions.push({
+                ...q,
+                score: part.score, // Override question score with config part score
+                correctAnswer: '', // SECURITY: Clear correct answer for client
+                blankCount: blankCount
             });
-
-            allQuestions = [...allQuestions, ...selectedQuestions];
         }
     }
 
     return { 
-        questions: allQuestions, 
+        questions: finalQuestions, 
         configName: mappedConfig.name, 
         passingScore: mappedConfig.passingScore 
     };

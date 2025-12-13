@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { QuizResult, User, QuizConfig } from '../types';
-import { getUserResults, getQuizConfigs, getPaginatedUserResultsByUserId } from '../services/storageService';
+import { useUserResults, useQuizConfigs } from '../hooks/useData';
 import { Button } from './Button';
 
 import { UserRole } from '../types';
@@ -13,45 +13,29 @@ interface UserDashboardProps {
 }
 
 export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onStartQuiz, onViewResult }) => {
-  const [history, setHistory] = useState<QuizResult[]>([]);
-  const [totalHistory, setTotalHistory] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  const [configs, setConfigs] = useState<QuizConfig[]>([]);
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
   // Config Pagination
   const [currentConfigPage, setCurrentConfigPage] = useState(1);
   const configItemsPerPage = 6;
   const [configSearchTerm, setConfigSearchTerm] = useState('');
 
-  // Initial Data Load (Configs)
-  useEffect(() => {
-    const fetchConfigs = async () => {
-        const loadedConfigs = await getQuizConfigs();
-        // Only show published configs to non-admin users
-        if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
-            setConfigs(loadedConfigs.filter(c => c.isPublished));
-        } else {
-            setConfigs(loadedConfigs);
-        }
-        setIsInitialLoading(false);
-    };
-    fetchConfigs();
-  }, [user.role]);
+  // SWR Hooks
+  const { configs: allConfigs, isLoading: isConfigsLoading } = useQuizConfigs();
+  const { results: history, total: totalHistory, isLoading: isHistoryLoading } = useUserResults(user.id, currentPage, itemsPerPage);
 
-  // History Data Load (Pagination)
-  useEffect(() => {
-    const fetchHistory = async () => {
-        setIsHistoryLoading(true);
-        const { data: loadedHistory, total } = await getPaginatedUserResultsByUserId(user.id, currentPage, itemsPerPage);
-        setHistory(loadedHistory);
-        setTotalHistory(total);
-        setIsHistoryLoading(false);
-    };
-    fetchHistory();
-  }, [user.id, currentPage]);
+  // Filter configs based on user role
+  const configs = React.useMemo(() => {
+      if (!allConfigs) return [];
+      let filtered = allConfigs;
+      if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+          filtered = filtered.filter(c => c.isPublished);
+      }
+      return filtered;
+  }, [allConfigs, user.role]);
+
+  const isInitialLoading = isConfigsLoading;
 
 
 

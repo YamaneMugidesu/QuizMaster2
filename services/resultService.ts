@@ -39,10 +39,7 @@ const mapResultFromDB = (r: DBResult): QuizResult => ({
 });
 
 // --- STATE ---
-let resultsCache: Map<string, { data: any; total?: number; timestamp: number }> = new Map();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
-export const clearResultsCache = () => { resultsCache.clear(); };
+// Removed manual cache variables
 
 // --- API ---
 
@@ -73,13 +70,9 @@ export const saveQuizResult = async (result: QuizResult): Promise<void> => {
     console.error('Error saving quiz result:', error);
     throw error;
   }
-  
-  // Invalidate cache
-  resultsCache.clear();
 };
 
 export const deleteQuizResult = async (id: string): Promise<void> => {
-    resultsCache.clear(); // Invalidate cache
     const { error } = await supabase.from('quiz_results').delete().eq('id', id);
     if (error) {
         console.error('Error deleting quiz result:', error);
@@ -88,14 +81,6 @@ export const deleteQuizResult = async (id: string): Promise<void> => {
 };
 
 export const getUserResults = async (userId: string): Promise<QuizResult[]> => {
-  const cacheKey = `user_all_${userId}`;
-  if (resultsCache.has(cacheKey)) {
-      const cached = resultsCache.get(cacheKey)!;
-      if (Date.now() - cached.timestamp < CACHE_TTL) {
-          return cached.data;
-      }
-  }
-
   const { data, error } = await supabase
     .from('quiz_results')
     .select('*')
@@ -104,7 +89,6 @@ export const getUserResults = async (userId: string): Promise<QuizResult[]> => {
 
   if (error) return [];
   const mapped = (data as any[]).map(mapResultFromDB);
-  resultsCache.set(cacheKey, { data: mapped, timestamp: Date.now() });
   return mapped;
 };
 
@@ -113,14 +97,6 @@ export const getPaginatedUserResultsByUserId = async (
   page: number,
   limit: number
 ): Promise<{ data: QuizResult[]; total: number }> => {
-  const cacheKey = `user_paginated_${userId}_${page}_${limit}`;
-  if (resultsCache.has(cacheKey)) {
-      const cached = resultsCache.get(cacheKey)!;
-      if (Date.now() - cached.timestamp < CACHE_TTL) {
-          return { data: cached.data, total: cached.total || 0 };
-      }
-  }
-
   const from = (page - 1) * limit;
   const to = from + limit - 1;
 
@@ -139,8 +115,6 @@ export const getPaginatedUserResultsByUserId = async (
   const mapped = (data || []).map(item => mapResultFromDB(item as DBResult));
   const total = count || 0;
   
-  resultsCache.set(cacheKey, { data: mapped, total, timestamp: Date.now() });
-
   return {
     data: mapped,
     total
@@ -148,14 +122,6 @@ export const getPaginatedUserResultsByUserId = async (
 };
 
 export const getAllUserResults = async (): Promise<QuizResult[]> => {
-  const cacheKey = `all_results`;
-  if (resultsCache.has(cacheKey)) {
-      const cached = resultsCache.get(cacheKey)!;
-      if (Date.now() - cached.timestamp < CACHE_TTL) {
-          return cached.data;
-      }
-  }
-
   const { data, error } = await supabase
     .from('quiz_results')
     .select('*')
@@ -163,7 +129,6 @@ export const getAllUserResults = async (): Promise<QuizResult[]> => {
 
   if (error) return [];
   const mapped = (data as any[]).map(mapResultFromDB);
-  resultsCache.set(cacheKey, { data: mapped, timestamp: Date.now() });
   return mapped;
 };
 
@@ -172,14 +137,6 @@ export const getPaginatedUserResults = async (
   limit: number, 
   searchTerm?: string
 ): Promise<{ data: QuizResult[]; total: number }> => {
-  const cacheKey = `paginated_results_${page}_${limit}_${searchTerm || ''}`;
-  if (resultsCache.has(cacheKey)) {
-      const cached = resultsCache.get(cacheKey)!;
-      if (Date.now() - cached.timestamp < CACHE_TTL) {
-          return { data: cached.data, total: cached.total || 0 };
-      }
-  }
-
   let query = supabase
     .from('quiz_results')
     .select('*', { count: 'exact' })
@@ -202,8 +159,6 @@ export const getPaginatedUserResults = async (
   const mapped = (data || []).map(item => mapResultFromDB(item as DBResult));
   const total = count || 0;
   
-  resultsCache.set(cacheKey, { data: mapped, total, timestamp: Date.now() });
-
   return {
     data: mapped,
     total
@@ -325,7 +280,6 @@ export const gradeQuiz = async (attempts: { questionId: string; userAnswer: stri
   };
 
 export const gradeQuizResult = async (resultId: string, attempts: any[], finalScore: number, isPassed: boolean): Promise<void> => {
-  resultsCache.clear(); // Invalidate results cache
   const { error } = await supabase
     .from('quiz_results')
     .update({

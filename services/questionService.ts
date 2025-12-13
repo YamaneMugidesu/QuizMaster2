@@ -1,15 +1,5 @@
 import { supabase } from './supabaseClient';
-import { Question, QuestionType, GradeLevel, Difficulty, QuestionCategory } from '../types';
-
-// --- TYPES ---
-export interface QuestionFilters {
-    search?: string;
-    subject?: string;
-    gradeLevel?: GradeLevel;
-    type?: QuestionType;
-    difficulty?: Difficulty;
-    category?: QuestionCategory;
-}
+import { Question, QuestionType, GradeLevel, Difficulty, QuestionCategory, QuestionFilters } from '../types';
 
 // Internal DB Type Mapping
 interface DBQuestion {
@@ -29,16 +19,6 @@ interface DBQuestion {
   needs_grading: boolean;
   explanation: string | null;
 }
-
-// --- STATE ---
-let questionsCache: { data: Question[]; timestamp: number } | null = null;
-let questionsQueryCache: Map<string, { data: Question[]; total: number; timestamp: number }> = new Map();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
-export const clearQuestionsCache = () => { 
-    questionsCache = null; 
-    questionsQueryCache.clear();
-};
 
 // --- HELPER: MAP DB TO FRONTEND ---
 export const mapQuestionFromDB = (q: DBQuestion): Question => ({
@@ -66,16 +46,6 @@ export const getQuestions = async (
     limit: number = 10, 
     filters: QuestionFilters = {}
 ): Promise<{ data: Question[]; total: number }> => {
-  const cacheKey = `questions_${page}_${limit}_${JSON.stringify(filters)}`;
-  
-  // 1. Try to serve from cache if fresh
-  if (questionsQueryCache.has(cacheKey)) {
-      const cached = questionsQueryCache.get(cacheKey)!;
-      if (Date.now() - cached.timestamp < CACHE_TTL) {
-          return { data: cached.data, total: cached.total };
-      }
-  }
-
   // Construct Query
   let query = supabase
     .from('questions')
@@ -112,24 +82,11 @@ export const getQuestions = async (
   
   if (error) {
     console.error('Error fetching questions:', error);
-    // 2. Fallback to stale cache if available
-    if (questionsQueryCache.has(cacheKey)) {
-        console.warn('Serving stale questions cache due to network error');
-        const cached = questionsQueryCache.get(cacheKey)!;
-        return { data: cached.data, total: cached.total };
-    }
     return { data: [], total: 0 };
   }
   
   // Use 'as any' safely here because we defined DBQuestion interface but supabase returns generalized types
   const mapped = (data as any[]).map(mapQuestionFromDB);
-  
-  // 3. Update cache
-  questionsQueryCache.set(cacheKey, { 
-      data: mapped, 
-      total: count || 0, 
-      timestamp: Date.now() 
-  });
   
   return { data: mapped, total: count || 0 };
 };
@@ -173,7 +130,6 @@ export const getAllQuestionsRaw = async (): Promise<Question[]> => {
 };
 
 export const saveQuestion = async (question: Question): Promise<void> => {
-  clearQuestionsCache(); // Invalidate cache
   const { id, ...rest } = question;
   
   const dbPayload = {
@@ -198,7 +154,6 @@ export const saveQuestion = async (question: Question): Promise<void> => {
 };
 
 export const updateQuestion = async (updatedQuestion: Question): Promise<void> => {
-  clearQuestionsCache(); // Invalidate cache
   const dbPayload = {
     type: updatedQuestion.type,
     text: updatedQuestion.text,
@@ -225,7 +180,6 @@ export const updateQuestion = async (updatedQuestion: Question): Promise<void> =
 };
 
 export const toggleQuestionVisibility = async (id: string): Promise<void> => {
-  clearQuestionsCache(); // Invalidate cache
   const { data } = await supabase.from('questions').select('is_disabled').eq('id', id).single();
   if (data) {
     await supabase.from('questions').update({ is_disabled: !data.is_disabled }).eq('id', id);
@@ -233,7 +187,6 @@ export const toggleQuestionVisibility = async (id: string): Promise<void> => {
 };
 
 export const deleteQuestion = async (id: string): Promise<void> => {
-  clearQuestionsCache(); // Invalidate cache
   // Soft delete
   const { error } = await supabase.from('questions').update({ is_deleted: true }).eq('id', id);
   if (error) console.error('Error deleting question:', error);

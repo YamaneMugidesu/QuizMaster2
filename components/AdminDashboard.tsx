@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Question, QuestionType, Difficulty, GradeLevel, QuestionFormData, UserRole, QuizResult, User, SUBJECTS, QuizConfig, QuestionCategory } from '../types';
-import { saveQuestion, getQuestions, updateQuestion, deleteQuestion, toggleQuestionVisibility, getAllUserResults, getPaginatedUserResults, getQuizConfigs, clearQuestionsCache, clearResultsCache, deleteQuizResult } from '../services/storageService';
+import { saveQuestion, updateQuestion, deleteQuestion, toggleQuestionVisibility, deleteQuizResult } from '../services/storageService';
+import { useQuestions, useQuizConfigs, useAllResults, mutateQuestions, mutateQuizConfigs, mutateResults } from '../hooks/useData';
 import { Button } from './Button';
 import { QuestionForm } from './QuestionForm';
 import { UserManagement } from './UserManagement';
@@ -15,32 +16,74 @@ interface AdminDashboardProps {
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onViewResult }) => {
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [totalQuestions, setTotalQuestions] = useState(0);
-  const [userResults, setUserResults] = useState<QuizResult[]>([]);
-  const [totalUserResults, setTotalUserResults] = useState(0);
-  const [quizConfigs, setQuizConfigs] = useState<QuizConfig[]>([]);
+  // Tabs
   const [activeTab, setActiveTab] = useState<'list' | 'create' | 'records' | 'config' | 'users'>('list');
-  const [isLoading, setIsLoading] = useState(true);
   
-  // Pagination & Search for Records
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
-  const [userSearchTerm, setUserSearchTerm] = useState('');
-
-  // Pagination for Questions
+  // --- QUESTIONS STATE ---
   const [currentQuestionPage, setCurrentQuestionPage] = useState(1);
   const questionsPerPage = 10;
-
-  // Filter States
+  
+  // Filters
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [filterSubject, setFilterSubject] = useState('');
   const [filterGrade, setFilterGrade] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterDifficulty, setFilterDifficulty] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
 
-  // Edit Modal State
+  // Debounce Search
+  useEffect(() => {
+      const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 300);
+      return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Use SWR Hook for Questions
+  const { 
+      questions, 
+      total: totalQuestions, 
+      isLoading: isQuestionsLoading 
+  } = useQuestions(currentQuestionPage, questionsPerPage, {
+      search: debouncedSearchTerm,
+      subject: filterSubject,
+      gradeLevel: filterGrade as GradeLevel,
+      type: filterType as QuestionType,
+      difficulty: filterDifficulty as Difficulty,
+      category: filterCategory as QuestionCategory
+  });
+
+  // --- RECORDS STATE ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+  const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [debouncedUserSearchTerm, setDebouncedUserSearchTerm] = useState('');
+
+  // Debounce User Search
+  useEffect(() => {
+      const timer = setTimeout(() => setDebouncedUserSearchTerm(userSearchTerm), 300);
+      return () => clearTimeout(timer);
+  }, [userSearchTerm]);
+
+  // Use SWR Hook for Results
+  const {
+      results: userResults,
+      total: totalUserResults,
+      isLoading: isResultsLoading
+  } = useAllResults(currentPage, itemsPerPage, debouncedUserSearchTerm);
+
+  // --- CONFIGS STATE ---
+  const { configs: quizConfigs } = useQuizConfigs();
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentQuestionPage(1);
+  }, [debouncedSearchTerm, filterSubject, filterGrade, filterType, filterDifficulty, filterCategory]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedUserSearchTerm]);
+
+  // --- MODAL STATES ---
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   
   // Delete Confirmation Modal State
@@ -49,105 +92,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
 
   // Grading Modal State
   const [gradingResult, setGradingResult] = useState<QuizResult | null>(null);
-
-  useEffect(() => {
-    loadData();
-  }, [activeTab]);
-
-  // Fetch Questions when pagination or filters change
-  useEffect(() => {
-      if (activeTab === 'list') {
-          const fetchQuestions = async () => {
-              setIsLoading(true);
-              const { data, total } = await getQuestions(currentQuestionPage, questionsPerPage, {
-                  search: searchTerm,
-                  subject: filterSubject,
-                  gradeLevel: filterGrade as GradeLevel,
-                  type: filterType as QuestionType,
-                  difficulty: filterDifficulty as Difficulty,
-                  category: filterCategory as QuestionCategory
-              });
-              setQuestions(data);
-              setTotalQuestions(total);
-              setIsLoading(false);
-          };
-          
-          const timer = setTimeout(() => {
-              fetchQuestions();
-          }, 300); // Debounce search
-          
-          return () => clearTimeout(timer);
-      }
-  }, [activeTab, currentQuestionPage, searchTerm, filterSubject, filterGrade, filterType, filterDifficulty, filterCategory]);
-
-  const loadData = async () => {
-    // Only load questions if we are in list mode - Handled by effect above
-    if (activeTab === 'list') {
-        // Initial load or tab switch triggers the effect
-    }
-    
-    if (activeTab === 'records') {
-       // Only fetch configs here. Results are fetched by separate effect
-       if (quizConfigs.length === 0) {
-           const configs = await getQuizConfigs();
-           setQuizConfigs(configs);
-       }
-    }
-  };
-
-  const refreshData = async () => {
-      setIsLoading(true);
-      if (activeTab === 'list') {
-          clearQuestionsCache();
-          // Trigger re-fetch
-          const { data, total } = await getQuestions(currentQuestionPage, questionsPerPage, {
-                search: searchTerm,
-                subject: filterSubject,
-                gradeLevel: filterGrade as GradeLevel,
-                type: filterType as QuestionType,
-                difficulty: filterDifficulty as Difficulty,
-                category: filterCategory as QuestionCategory
-          });
-          setQuestions(data);
-          setTotalQuestions(total);
-      } else if (activeTab === 'records') {
-          clearResultsCache();
-          // Trigger re-fetch via effect or direct call
-          const { data, total } = await getPaginatedUserResults(currentPage, itemsPerPage, userSearchTerm);
-          setUserResults(data);
-          setTotalUserResults(total);
-      }
-      setIsLoading(false);
-  };
-
-  // Fetch User Results (Server-side Pagination)
-  useEffect(() => {
-    if (activeTab === 'records') {
-        const fetchResults = async () => {
-            setIsLoading(true);
-            const { data, total } = await getPaginatedUserResults(currentPage, itemsPerPage, userSearchTerm);
-            setUserResults(data);
-            setTotalUserResults(total);
-            setIsLoading(false);
-        };
-
-        const timer = setTimeout(() => {
-            fetchResults();
-        }, 300); // Debounce search
-
-        return () => clearTimeout(timer);
-    }
-  }, [activeTab, currentPage, userSearchTerm]);
-
-  // Reset pagination when switching tabs or searching
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [activeTab, userSearchTerm]);
-
-  // Reset question pagination when searching/filtering
-  useEffect(() => {
-    setCurrentQuestionPage(1);
-  }, [activeTab, searchTerm, filterSubject, filterGrade, filterType, filterDifficulty, filterCategory]);
 
   const handleCreate = async (data: QuestionFormData) => {
     const newQ: Question = {
@@ -167,8 +111,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       isDisabled: false
     };
     await saveQuestion(newQ);
+    mutateQuestions();
     setActiveTab('list');
-    loadData();
   };
 
   const handleUpdate = async (data: QuestionFormData) => {
@@ -190,8 +134,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
     };
     
     await updateQuestion(updatedQ);
+    mutateQuestions();
     setEditingQuestion(null);
-    refreshData();
   };
 
   const initiateDelete = (e: React.MouseEvent, id: string) => {
@@ -203,8 +147,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   const confirmDelete = async () => {
     if (questionToDelete) {
       await deleteQuestion(questionToDelete);
+      mutateQuestions();
       setQuestionToDelete(null);
-      refreshData();
     }
   };
 
@@ -212,7 +156,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
     e.preventDefault();
     e.stopPropagation();
     await toggleQuestionVisibility(id);
-    refreshData();
+    mutateQuestions();
   };
 
   const resetFilters = () => {
@@ -239,7 +183,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       if (recordToDelete) {
           try {
               await deleteQuizResult(recordToDelete);
-              refreshData();
+              mutateResults();
           } catch (error) {
               console.error('Failed to delete record:', error);
               alert('删除记录失败');
@@ -308,18 +252,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
     });
   };
 
-  // Filter Logic (Server-side handled)
-  const filteredQuestions = questions; // Direct use as it's already filtered from server
-
+  // Calculate total pages
   const totalQuestionPages = Math.ceil(totalQuestions / questionsPerPage);
-  const paginatedQuestions = questions; // Direct use as it's already paginated from server
-
-  // User Results Logic (Server-side Pagination)
-  // userResults is already paginated and filtered from server
   const totalPages = Math.ceil(totalUserResults / itemsPerPage);
-  const paginatedUserResults = userResults;
 
-  if (isLoading && activeTab === 'list' && questions.length === 0) {
+  const refreshData = async () => {
+      if (activeTab === 'list') {
+          mutateQuestions();
+      } else if (activeTab === 'records') {
+          mutateResults();
+      }
+  };
+
+  if (isQuestionsLoading && activeTab === 'list' && questions.length === 0) {
       return <div className="p-10 text-center">加载中...</div>;
   }
 
@@ -479,7 +424,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
             ) : (
                 <>
                 <ul className="divide-y divide-gray-100">
-                {paginatedQuestions.map((q) => (
+                {questions.map((q) => (
                     <li key={q.id} className={`p-4 transition-colors ${q.isDisabled ? 'bg-gray-100' : 'hover:bg-gray-50'}`}>
                     <div className="flex justify-between items-start">
                         <div className={`flex-1 ${q.isDisabled ? 'opacity-50' : ''}`}>
@@ -605,7 +550,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                 {totalQuestionPages > 1 && (
                     <div className="flex items-center justify-between px-6 py-3 border-t border-gray-100 bg-gray-50">
                         <div className="text-sm text-gray-500">
-                            显示 {(currentQuestionPage - 1) * questionsPerPage + 1} 到 {Math.min(currentQuestionPage * questionsPerPage, filteredQuestions.length)} 条，共 {filteredQuestions.length} 条
+                            显示 {(currentQuestionPage - 1) * questionsPerPage + 1} 到 {Math.min(currentQuestionPage * questionsPerPage, totalQuestions)} 条，共 {totalQuestions} 条
                         </div>
                         <div className="flex gap-2">
                             <Button 
@@ -680,7 +625,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                     </svg>
                  </div>
              </div>
-             {isLoading ? (
+             {isResultsLoading ? (
                 <div className="p-10 text-center text-gray-500">加载中...</div>
              ) : totalUserResults === 0 ? (
                 <div className="p-10 text-center text-gray-500">
@@ -701,7 +646,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                         {paginatedUserResults.map((result) => (
+                         {userResults.map((result) => (
                             <React.Fragment key={result.id}>
                             <tr 
                                className="hover:bg-primary-50 transition-colors cursor-pointer"
@@ -884,7 +829,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
               onClose={() => setGradingResult(null)}
               onComplete={() => {
                   setGradingResult(null);
-                  loadData(); // Reload to see updated status
+                  mutateResults(); // Reload to see updated status
               }}
           />
       )}

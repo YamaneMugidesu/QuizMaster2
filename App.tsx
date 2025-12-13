@@ -1,13 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { AdminDashboard } from './components/AdminDashboard';
-import { QuizTaker } from './components/QuizTaker';
-import { QuizResultView } from './components/QuizResult';
-import { UserDashboard } from './components/UserDashboard';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { User, UserRole, QuizResult } from './types';
 import { Button } from './components/Button';
 import { loginUser, registerUser, saveQuizResult, checkUserStatus, getSystemSetting } from './services/storageService';
 import { supabase } from './services/supabaseClient';
 import { ToastProvider, useToast } from './components/Toast';
+
+const AdminDashboard = lazy(() => import('./components/AdminDashboard').then(module => ({ default: module.AdminDashboard })));
+const QuizTaker = lazy(() => import('./components/QuizTaker').then(module => ({ default: module.QuizTaker })));
+const QuizResultView = lazy(() => import('./components/QuizResult').then(module => ({ default: module.QuizResultView })));
+const UserDashboard = lazy(() => import('./components/UserDashboard').then(module => ({ default: module.UserDashboard })));
+
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center min-h-[50vh]">
+    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+  </div>
+);
 
 // Wrap the main content to use the useToast hook
 const MainContent: React.FC = () => {
@@ -295,7 +302,7 @@ const MainContent: React.FC = () => {
         </div>
       </header>
       <main className="max-w-7xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
-        
+        <Suspense fallback={<LoadingSpinner />}>
         {/* Global Result View */}
         {view === 'result' && currentResult && (
              <QuizResultView 
@@ -334,6 +341,7 @@ const MainContent: React.FC = () => {
                 )}
             </>
         )}
+        </Suspense>
       </main>
     </div>
   );
