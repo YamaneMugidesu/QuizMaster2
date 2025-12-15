@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { Question, QuestionType, GradeLevel, Difficulty, QuestionCategory, QuestionFilters } from '../types';
+import { logger } from './loggerService';
 
 // Internal DB Type Mapping
 interface DBQuestion {
@@ -15,6 +16,7 @@ interface DBQuestion {
   category: string | null;
   created_at: number;
   is_disabled: boolean;
+  is_deleted?: boolean;
   score: number;
   needs_grading: boolean;
   explanation: string | null;
@@ -36,7 +38,8 @@ export const mapQuestionFromDB = (q: DBQuestion): Question => ({
   isDisabled: q.is_disabled,
   score: q.score,
   needsGrading: q.needs_grading,
-  explanation: q.explanation || undefined
+  explanation: q.explanation || undefined,
+  isDeleted: q.is_deleted
 });
 
 // --- API ---
@@ -49,8 +52,14 @@ export const getQuestions = async (
   // Construct Query
   let query = supabase
     .from('questions')
-    .select('*', { count: 'exact' })
-    .neq('is_deleted', true);
+    .select('*', { count: 'exact' });
+
+  // Handle isDeleted filter (default to false if not specified)
+  if (filters.isDeleted === true) {
+      query = query.eq('is_deleted', true);
+  } else {
+      query = query.neq('is_deleted', true);
+  }
 
   // Apply Filters
   if (filters.search) {
@@ -81,8 +90,8 @@ export const getQuestions = async (
     .range(from, to);
   
   if (error) {
-    console.error('Error fetching questions:', error);
-    return { data: [], total: 0 };
+    logger.error('DB', 'Error fetching questions', { filters, page }, error);
+    throw error;
   }
   
   // Use 'as any' safely here because we defined DBQuestion interface but supabase returns generalized types
@@ -91,7 +100,7 @@ export const getQuestions = async (
   return { data: mapped, total: count || 0 };
 };
 
-export const getQuestionsByIds = async (ids: string[]): Promise<Question[]> => {
+export const getQuestionsByIds = async (ids: string[], includeDeleted: boolean = false): Promise<Question[]> => {
     if (ids.length === 0) return [];
     // Chunking to avoid URL length limits if too many IDs (though unlikely for a quiz)
     const chunkSize = 20;
@@ -100,26 +109,47 @@ export const getQuestionsByIds = async (ids: string[]): Promise<Question[]> => {
         chunks.push(ids.slice(i, i + chunkSize));
     }
 
-    let allQuestions: Question[] = [];
-    
+    let allQuestions: DBQuestion[] = [];
+
     for (const chunk of chunks) {
-        const { data, error } = await supabase
-            .from('questions')
-            .select('*')
-            .in('id', chunk);
-        
-        if (error) {
-            console.error('Error fetching questions by IDs:', error);
-            continue;
+        let query = supabase.from('questions').select('*').in('id', chunk);
+        if (!includeDeleted) {
+            query = query.neq('is_deleted', true);
         }
         
+        const { data, error } = await query;
+        if (error) {
+            logger.error('DB', 'Error fetching questions by IDs', { ids: chunk }, error);
+            throw error;
+        }
         if (data) {
-            const mapped = (data as any[]).map(mapQuestionFromDB);
-            allQuestions = [...allQuestions, ...mapped];
+            allQuestions = [...allQuestions, ...data as any[]];
         }
     }
     
-    return allQuestions;
+    // Sort to match order of IDs (optional but nice)
+    // const idMap = new Map(allQuestions.map(q => [q.id, q]));
+    // return ids.map(id => idMap.get(id)).filter(q => !!q).map(mapQuestionFromDB);
+    
+    return allQuestions.map(mapQuestionFromDB);
+};
+
+export const restoreQuestion = async (id: string): Promise<void> => {
+    const { error } = await supabase.from('questions').update({ is_deleted: false }).eq('id', id);
+    if (error) {
+        logger.error('DB', 'Error restoring question', { id }, error);
+        throw error;
+    }
+    logger.info('DB', 'Question restored', { id });
+};
+
+export const hardDeleteQuestion = async (id: string): Promise<void> => {
+    const { error } = await supabase.from('questions').delete().eq('id', id);
+    if (error) {
+        logger.error('DB', 'Error hard deleting question', { id }, error);
+        throw error;
+    }
+    logger.info('DB', 'Question permanently deleted', { id });
 };
 
 // Legacy support for getting all questions (if needed by other components, though we should migrate)
@@ -129,7 +159,7 @@ export const getAllQuestionsRaw = async (): Promise<Question[]> => {
     return (data as any[]).map(mapQuestionFromDB);
 };
 
-export const saveQuestion = async (question: Question): Promise<void> => {
+export const saveQuestion = async (question: Question): Promise<Question> => {
   const { id, ...rest } = question;
   
   const dbPayload = {
@@ -149,8 +179,20 @@ export const saveQuestion = async (question: Question): Promise<void> => {
     explanation: rest.explanation
   };
 
-  const { error } = await supabase.from('questions').insert(dbPayload);
-  if (error) console.error('Error saving question:', error);
+  const { data, error } = await supabase
+    .from('questions')
+    .insert(dbPayload)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('DB', 'Error saving question', { questionText: rest.text }, error);
+    throw error;
+  }
+  
+  const savedQuestion = mapQuestionFromDB(data as DBQuestion);
+  logger.info('SYSTEM', 'Question created', { questionId: savedQuestion.id, subject: savedQuestion.subject });
+  return savedQuestion;
 };
 
 export const updateQuestion = async (updatedQuestion: Question): Promise<void> => {
@@ -176,20 +218,42 @@ export const updateQuestion = async (updatedQuestion: Question): Promise<void> =
     .update(dbPayload)
     .eq('id', updatedQuestion.id);
     
-  if (error) console.error('Error updating question:', error);
+  if (error) {
+    logger.error('DB', 'Error updating question', { questionId: updatedQuestion.id }, error);
+    throw error;
+  }
+  
+  logger.info('SYSTEM', 'Question updated', { questionId: updatedQuestion.id });
 };
 
 export const toggleQuestionVisibility = async (id: string): Promise<void> => {
-  const { data } = await supabase.from('questions').select('is_disabled').eq('id', id).single();
-  if (data) {
-    await supabase.from('questions').update({ is_disabled: !data.is_disabled }).eq('id', id);
+  const { data, error: fetchError } = await supabase.from('questions').select('is_disabled').eq('id', id).single();
+  
+  if (fetchError) {
+      logger.error('DB', 'Error fetching question status for toggle', { questionId: id }, fetchError);
+      throw fetchError;
   }
+  
+  const newValue = !data.is_disabled;
+  
+  const { error } = await supabase.from('questions').update({ is_disabled: newValue }).eq('id', id);
+  if (error) {
+      logger.error('DB', 'Error toggling question visibility', { questionId: id, newValue }, error);
+      throw error;
+  }
+  
+  logger.info('SYSTEM', 'Question visibility toggled', { questionId: id, isDisabled: newValue });
 };
 
 export const deleteQuestion = async (id: string): Promise<void> => {
-  // Soft delete
-  const { error } = await supabase.from('questions').update({ is_deleted: true }).eq('id', id);
-  if (error) console.error('Error deleting question:', error);
+    // Soft delete
+    const { error } = await supabase.from('questions').update({ is_deleted: true }).eq('id', id);
+    if (error) {
+        logger.error('DB', 'Error deleting question', { questionId: id }, error);
+        throw error;
+    }
+    
+    logger.warn('SYSTEM', 'Question soft deleted', { questionId: id });
 };
 
 export const getAvailableQuestionCount = async (

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
-import { getPaginatedUsers, adminAddUser, deleteUser, updateUserRole, updateUserProfile, getSystemSetting, updateSystemSetting } from '../services/storageService';
+import { adminAddUser, deleteUser, updateUserRole, updateUserProfile, getSystemSetting, updateSystemSetting } from '../services/storageService';
+import { useUsers, mutateUsers } from '../hooks/useData';
 import { Button } from './Button';
 import { useToast } from './Toast';
 
@@ -23,33 +24,36 @@ interface EditUserForm {
 }
 
 export const UserManagement: React.FC = () => {
-  const [users, setUsers] = useState<User[]>([]);
-  const [totalUsers, setTotalUsers] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const { addToast } = useToast();
-  
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+
+  const { users, total: totalUsers, isLoading: loading, isError } = useUsers(currentPage, itemsPerPage);
+  const { addToast } = useToast();
   
+  useEffect(() => {
+    if (isError) {
+      addToast('获取用户列表失败', 'error');
+    }
+  }, [isError, addToast]);
+
   // New User Form State
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>(UserRole.USER);
   const [isAdding, setIsAdding] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false); // For add user
 
   // Edit User Form State
   const [editingUser, setEditingUser] = useState<EditUserForm | null>(null);
+  const [isSaving, setIsSaving] = useState(false); // For edit user
 
   // Modal State for Confirmation
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false); // For confirmation actions
 
   // System Settings State
   const [allowRegistration, setAllowRegistration] = useState<boolean>(true);
-
-  useEffect(() => {
-    loadUsers();
-  }, [currentPage]);
 
   useEffect(() => {
     loadSettings();
@@ -71,28 +75,28 @@ export const UserManagement: React.FC = () => {
       }
   };
 
-  const loadUsers = async () => {
-    setLoading(true);
-    const { data, total } = await getPaginatedUsers(currentPage, itemsPerPage);
-    setUsers(data);
-    setTotalUsers(total);
-    setLoading(false);
-  };
-
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUsername || !newPassword) return;
 
-    const result = await adminAddUser(newUsername, newPassword, newRole);
-    if (result.success) {
-      setNewUsername('');
-      setNewPassword('');
-      setNewRole(UserRole.USER);
-      setIsAdding(false);
-      await loadUsers();
-      addToast('用户添加成功', 'success');
-    } else {
-      addToast(result.message, 'error');
+    setIsSubmitting(true);
+    try {
+        const result = await adminAddUser(newUsername, newPassword, newRole);
+        if (result.success) {
+            setNewUsername('');
+            setNewPassword('');
+            setNewRole(UserRole.USER);
+            setIsAdding(false);
+            mutateUsers();
+            addToast('用户添加成功', 'success');
+        } else {
+            addToast(result.message, 'error');
+        }
+    } catch (error) {
+        console.error('Failed to add user:', error);
+        addToast('添加用户时发生错误', 'error');
+    } finally {
+        setIsSubmitting(false);
     }
   };
 
@@ -139,24 +143,32 @@ export const UserManagement: React.FC = () => {
   const handleSaveEdit = async () => {
     if (!editingUser) return;
 
-    const updates: any = {
-      username: editingUser.username,
-      role: editingUser.role,
-      isActive: editingUser.isActive
-    };
-    
-    if (editingUser.password && editingUser.password.trim() !== '') {
-        updates.password = editingUser.password;
-    }
-    
-    const { success, error } = await updateUserProfile(editingUser.id, updates);
-    
-    if (success) {
-        addToast(`用户 ${editingUser.username} 信息已更新`, 'success');
-        setEditingUser(null);
-        await loadUsers();
-    } else {
-        addToast(`更新失败: ${error?.message || '未知错误'}`, 'error');
+    setIsSaving(true);
+    try {
+        const updates: any = {
+            username: editingUser.username,
+            role: editingUser.role,
+            isActive: editingUser.isActive
+        };
+        
+        if (editingUser.password && editingUser.password.trim() !== '') {
+            updates.password = editingUser.password;
+        }
+        
+        const { success, error } = await updateUserProfile(editingUser.id, updates);
+        
+        if (success) {
+            addToast(`用户 ${editingUser.username} 信息已更新`, 'success');
+            setEditingUser(null);
+            mutateUsers();
+        } else {
+            addToast(`更新失败: ${error?.message || '未知错误'}`, 'error');
+        }
+    } catch (error) {
+        console.error('Failed to update user:', error);
+        addToast('更新用户时发生错误', 'error');
+    } finally {
+        setIsSaving(false);
     }
   };
 
@@ -165,40 +177,47 @@ export const UserManagement: React.FC = () => {
   const confirmAction = async () => {
     if (!pendingAction) return;
 
-    if (pendingAction.type === 'DELETE') {
-      const { success, error } = await deleteUser(pendingAction.user.id);
-      if (success) {
-          addToast(`用户 ${pendingAction.user.username} 已被删除`, 'success');
-          await loadUsers();
-      } else {
-          addToast(`删除用户失败: ${error?.message || '未知错误'}`, 'error');
-      }
-    } else if (pendingAction.type === 'CHANGE_ROLE' && pendingAction.newRole) {
-      const { success, error } = await updateUserRole(pendingAction.user.id, pendingAction.newRole);
-      if (success) {
-          addToast(`用户 ${pendingAction.user.username} 权限已更新`, 'success');
-          await loadUsers();
-      } else {
-          addToast(`权限更新失败: ${error?.message || '未知错误'}`, 'error');
-      }
-    } else if (pendingAction.type === 'TOGGLE_STATUS' && pendingAction.newStatus !== undefined) {
-      const { success, error } = await updateUserProfile(pendingAction.user.id, { isActive: pendingAction.newStatus });
-      if (success) {
-          addToast(`用户 ${pendingAction.user.username} 状态已更新`, 'success');
-          await loadUsers();
-      } else {
-          addToast(`状态更新失败: ${error?.message || '未知错误'}`, 'error');
-      }
+    setIsProcessing(true);
+    try {
+        if (pendingAction.type === 'DELETE') {
+            const { success, error } = await deleteUser(pendingAction.user.id);
+            if (success) {
+                addToast(`用户 ${pendingAction.user.username} 已被删除`, 'success');
+                mutateUsers();
+            } else {
+                addToast(`删除用户失败: ${error?.message || '未知错误'}`, 'error');
+            }
+        } else if (pendingAction.type === 'CHANGE_ROLE' && pendingAction.newRole) {
+            const { success, error } = await updateUserRole(pendingAction.user.id, pendingAction.newRole);
+            if (success) {
+                addToast(`用户 ${pendingAction.user.username} 权限已更新`, 'success');
+                mutateUsers();
+            } else {
+                addToast(`权限更新失败: ${error?.message || '未知错误'}`, 'error');
+            }
+        } else if (pendingAction.type === 'TOGGLE_STATUS' && pendingAction.newStatus !== undefined) {
+            const { success, error } = await updateUserProfile(pendingAction.user.id, { isActive: pendingAction.newStatus });
+            if (success) {
+                addToast(`用户 ${pendingAction.user.username} 状态已更新`, 'success');
+                mutateUsers();
+            } else {
+                addToast(`状态更新失败: ${error?.message || '未知错误'}`, 'error');
+            }
+        }
+        setPendingAction(null);
+    } catch (error) {
+        console.error('Action failed:', error);
+        addToast('操作执行失败', 'error');
+    } finally {
+        setIsProcessing(false);
     }
-    
-    setPendingAction(null);
   };
 
   // Cancel the pending action
   const cancelAction = () => {
     setPendingAction(null);
     // Reload to reset dropdown UI if needed
-    loadUsers();
+    mutateUsers();
   };
 
   const getRoleLabel = (role: UserRole) => {
@@ -280,7 +299,7 @@ export const UserManagement: React.FC = () => {
                     <option value={UserRole.ADMIN}>普通管理员</option>
                   </select>
                </div>
-               <Button type="submit" className="h-[38px]">确认添加</Button>
+               <Button type="submit" className="h-[38px]" isLoading={isSubmitting}>确认添加</Button>
             </div>
           </form>
         )}
@@ -458,10 +477,10 @@ export const UserManagement: React.FC = () => {
                 </div>
 
                 <div className="flex justify-end gap-3 mt-8">
-                    <Button variant="secondary" onClick={() => setEditingUser(null)}>
+                    <Button variant="secondary" onClick={() => setEditingUser(null)} disabled={isSaving}>
                         取消
                     </Button>
-                    <Button variant="primary" onClick={handleSaveEdit}>
+                    <Button variant="primary" onClick={handleSaveEdit} isLoading={isSaving}>
                         保存修改
                     </Button>
                 </div>
@@ -504,12 +523,13 @@ export const UserManagement: React.FC = () => {
                 </div>
 
                 <div className="flex justify-end gap-3">
-                    <Button variant="secondary" onClick={cancelAction}>
+                    <Button variant="secondary" onClick={cancelAction} disabled={isProcessing}>
                         取消
                     </Button>
                     <Button 
                         variant={pendingAction.type === 'DELETE' ? 'danger' : 'primary'} 
                         onClick={confirmAction}
+                        isLoading={isProcessing}
                     >
                         确认{pendingAction.type === 'DELETE' ? '删除' : '修改'}
                     </Button>

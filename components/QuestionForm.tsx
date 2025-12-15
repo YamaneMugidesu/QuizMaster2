@@ -11,11 +11,13 @@ const RichTextEditor = React.lazy(() => import('./RichTextEditor').then(module =
 interface QuestionFormProps {
   initialData?: Question;
   onSubmit: (data: QuestionFormData) => void;
+  onSaveAndContinue?: (data: QuestionFormData) => void;
   onCancel?: () => void;
   submitLabel?: string;
+  isLoading?: boolean;
 }
 
-export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmit, onCancel, submitLabel = '保存题目' }) => {
+export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmit, onSaveAndContinue, onCancel, submitLabel = '保存题目', isLoading = false }) => {
   const [type, setType] = useState<QuestionType>(QuestionType.MULTIPLE_CHOICE);
   const [questionText, setQuestionText] = useState('');
   const [imageUrls, setImageUrls] = useState<string[]>([]);
@@ -167,28 +169,26 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
       setOptions(newOptions);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
+  const getValidatedData = (): QuestionFormData | null => {
     // --- Input Validation ---
     const stripHtml = (html: string) => html.replace(/<[^>]+>/g, '').trim();
 
     // 1. Validate Question Text
     if (!questionText || stripHtml(questionText) === '') {
         addToast("请输入题目内容", 'warning');
-        return;
+        return null;
     }
 
     // 2. Validate Options (for Choice questions)
     if (type === QuestionType.MULTIPLE_CHOICE || type === QuestionType.MULTIPLE_SELECT) {
         if (options.length < 2) {
             addToast("请至少设置两个选项", 'warning');
-            return;
+            return null;
         }
         for (let i = 0; i < options.length; i++) {
             if (!options[i] || stripHtml(options[i]) === '') {
                 addToast(`请输入选项 ${String.fromCharCode(65 + i)} 的内容`, 'warning');
-                return;
+                return null;
             }
         }
     }
@@ -199,29 +199,29 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
     if (type === QuestionType.MULTIPLE_CHOICE) {
         if (!correctAnswer) {
             addToast("请选择正确答案", 'warning');
-            return;
+            return null;
         }
     } else if (type === QuestionType.TRUE_FALSE) {
         if (!correctAnswer) {
             addToast("请选择正确答案", 'warning');
-            return;
+            return null;
         }
     } else if (type === QuestionType.SHORT_ANSWER) {
          if (!correctAnswer || stripHtml(correctAnswer) === '') {
              addToast("请输入参考答案", 'warning');
-             return;
+             return null;
          }
     } else if (type === QuestionType.MULTIPLE_SELECT) {
         finalCorrectAnswer = JSON.stringify(correctOptions.sort());
         if (correctOptions.length === 0) {
             addToast("请至少选择一个正确选项", 'warning');
-            return;
+            return null;
         }
     } else if (type === QuestionType.FILL_IN_THE_BLANK) {
         finalCorrectAnswer = JSON.stringify(blankAnswers);
         if (blankAnswers.every(b => !b || stripHtml(b) === '')) {
              addToast("请至少输入一个填空答案", 'warning');
-             return;
+             return null;
         }
     }
 
@@ -232,7 +232,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
       finalOptions = ['正确', '错误'];
     }
 
-    onSubmit({
+    return {
       type,
       text: questionText,
       imageUrls,
@@ -244,11 +244,29 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
       category,
       needsGrading: type === QuestionType.SHORT_ANSWER ? needsGrading : false,
       explanation
-    });
+    };
+  };
 
-    if (!initialData) {
-        resetForm();
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const data = getValidatedData();
+    if (data) {
+        onSubmit(data);
+        if (!initialData) {
+            resetForm();
+        }
     }
+  };
+
+  const handleSaveAndContinue = (e: React.MouseEvent) => {
+      e.preventDefault();
+      const data = getValidatedData();
+      if (data && onSaveAndContinue) {
+          onSaveAndContinue(data);
+          if (!initialData) {
+              resetForm();
+          }
+      }
   };
 
   const resetForm = () => {
@@ -594,7 +612,17 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
                取消
              </Button>
           )}
-          <Button type="submit">{submitLabel}</Button>
+          {onSaveAndContinue && (
+              <Button 
+                type="button" 
+                variant="secondary" 
+                onClick={handleSaveAndContinue}
+                isLoading={isLoading}
+              >
+                保存并继续添加
+              </Button>
+          )}
+          <Button type="submit" isLoading={isLoading}>{submitLabel}</Button>
         </div>
       </form>
     </div>

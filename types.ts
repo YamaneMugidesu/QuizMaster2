@@ -43,6 +43,7 @@ export interface Question {
   needsGrading?: boolean; // For SHORT_ANSWER: requires manual grading
   explanation?: string; // New field for answer explanation
   blankCount?: number; // Runtime field for FILL_IN_THE_BLANK questions to indicate number of inputs
+  isDeleted?: boolean; // New field for soft delete status
 }
 
 export interface QuizAttempt {
@@ -71,6 +72,7 @@ export interface User {
   role: UserRole;
   createdAt: number;
   isActive?: boolean; // New field for user status (true: active, false: suspended)
+  isDeleted?: boolean; // New field for soft delete status
 }
 
 export interface QuizResult {
@@ -115,6 +117,7 @@ export interface QuestionFilters {
   type?: QuestionType;
   difficulty?: Difficulty;
   category?: QuestionCategory;
+  isDeleted?: boolean;
 }
 
 // --- Shared Constants ---
@@ -144,4 +147,5 @@ export interface QuizConfig {
   createdAt: number;
   quizMode?: 'practice' | 'exam'; // 'practice': show details, 'exam': hide details (unless admin)
   isPublished?: boolean; // Whether the quiz is available to regular users
+  isDeleted?: boolean; // New field for soft delete status
 }

@@ -5,6 +5,7 @@ import { gradeQuizResult } from '../services/storageService';
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
 import { useToast } from './Toast';
+import { sanitizeHTML } from '../utils/sanitize';
 
 interface GradingModalProps {
   result: QuizResult;
@@ -92,7 +93,7 @@ export const GradingModal: React.FC<GradingModalProps> = ({ result, onClose, onC
                             
                             <div className="mb-3">
                                 <h4 className="font-medium text-gray-900 mb-1">题目:</h4>
-                                <div className="text-gray-800 rich-text-content ql-editor" style={{ padding: 0 }} dangerouslySetInnerHTML={{ __html: attempt.questionText }} />
+                                <div className="text-gray-800 rich-text-content ql-editor" style={{ padding: 0 }} dangerouslySetInnerHTML={{ __html: sanitizeHTML(attempt.questionText) }} />
                                 {attempt.questionImageUrls && attempt.questionImageUrls.length > 0 && (
                                     <div className="flex gap-2 mt-2">
                                         {attempt.questionImageUrls.map((url, i) => (
@@ -109,7 +110,7 @@ export const GradingModal: React.FC<GradingModalProps> = ({ result, onClose, onC
                                 </div>
                                 <div className="bg-green-50 p-3 rounded border border-green-100">
                                     <h5 className="text-xs font-bold text-green-700 uppercase mb-1">参考答案</h5>
-                                    <div className="text-green-900 rich-text-content ql-editor" style={{ padding: 0 }} dangerouslySetInnerHTML={{ __html: attempt.correctAnswerText }} />
+                                    <div className="text-green-900 rich-text-content ql-editor" style={{ padding: 0 }} dangerouslySetInnerHTML={{ __html: sanitizeHTML(attempt.correctAnswerText) }} />
                                 </div>
                             </div>
 

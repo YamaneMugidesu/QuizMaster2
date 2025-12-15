@@ -18,6 +18,18 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      build: {
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              'vendor-react': ['react', 'react-dom'],
+              'vendor-supabase': ['@supabase/supabase-js'],
+              'vendor-editor': ['react-quill-new'],
+              'vendor-utils': ['dompurify', 'swr']
+            }
+          }
+        }
       }
     };
 });

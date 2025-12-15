@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient';
 import { QuizResult, QuestionType } from '../types';
 import { checkUserStatus } from './authService';
 import { mapQuestionFromDB } from './questionService';
+import { logger } from './loggerService';
 
 // Internal DB Type
 interface DBResult {
@@ -67,17 +68,21 @@ export const saveQuizResult = async (result: QuizResult): Promise<void> => {
   }]);
 
   if (error) {
-    console.error('Error saving quiz result:', error);
+    logger.error('USER_ACTION', 'Error saving quiz result', { userId: result.userId, score: result.score }, error);
     throw error;
   }
+  
+  logger.info('USER_ACTION', 'Quiz result saved', { userId: result.userId, score: result.score, passed: result.isPassed });
 };
 
 export const deleteQuizResult = async (id: string): Promise<void> => {
     const { error } = await supabase.from('quiz_results').delete().eq('id', id);
     if (error) {
-        console.error('Error deleting quiz result:', error);
+        logger.error('USER_ACTION', 'Error deleting quiz result', { resultId: id }, error);
         throw error;
     }
+    
+    logger.warn('USER_ACTION', 'Quiz result deleted', { resultId: id });
 };
 
 export const getUserResults = async (userId: string): Promise<QuizResult[]> => {
@@ -87,7 +92,10 @@ export const getUserResults = async (userId: string): Promise<QuizResult[]> => {
     .eq('user_id', userId)
     .order('timestamp', { ascending: false });
 
-  if (error) return [];
+  if (error) {
+    console.error('Error fetching user results:', error);
+    throw error;
+  }
   const mapped = (data as any[]).map(mapResultFromDB);
   return mapped;
 };
@@ -109,7 +117,7 @@ export const getPaginatedUserResultsByUserId = async (
 
   if (error) {
     console.error('Error fetching user results:', error);
-    return { data: [], total: 0 };
+    throw error;
   }
 
   const mapped = (data || []).map(item => mapResultFromDB(item as DBResult));
@@ -127,7 +135,10 @@ export const getAllUserResults = async (): Promise<QuizResult[]> => {
     .select('*')
     .order('timestamp', { ascending: false });
 
-  if (error) return [];
+  if (error) {
+    console.error('Error fetching all results:', error);
+    throw error;
+  }
   const mapped = (data as any[]).map(mapResultFromDB);
   return mapped;
 };
@@ -153,7 +164,7 @@ export const getPaginatedUserResults = async (
 
   if (error) {
     console.error('Error fetching paginated results:', error);
-    return { data: [], total: 0 };
+    throw error;
   }
 
   const mapped = (data || []).map(item => mapResultFromDB(item as DBResult));
@@ -279,7 +290,18 @@ export const gradeQuiz = async (attempts: { questionId: string; userAnswer: stri
     return { attempts: gradedAttempts, score: totalScore };
   };
 
-export const gradeQuizResult = async (resultId: string, attempts: any[], finalScore: number, isPassed: boolean): Promise<void> => {
+export const gradeQuizResult = async (
+  resultId: string, 
+  attempts: any[], 
+  finalScore: number, 
+  isPassed: boolean,
+  logContext?: { 
+      type: 'SINGLE_UPDATE' | 'BATCH_GRADING', 
+      questionId?: string, 
+      oldScore?: number, 
+      newScore?: number 
+  }
+): Promise<void> => {
   const { error } = await supabase
     .from('quiz_results')
     .update({
@@ -290,5 +312,21 @@ export const gradeQuizResult = async (resultId: string, attempts: any[], finalSc
     })
     .eq('id', resultId);
 
-  if (error) console.error('Error grading result:', error);
+  if (error) {
+    logger.error('USER_ACTION', 'Error grading result', { resultId, finalScore }, error);
+    throw error;
+  }
+  
+  if (logContext?.type === 'SINGLE_UPDATE') {
+      logger.info('USER_ACTION', 'Admin updated single question score', { 
+          resultId, 
+          questionId: logContext.questionId,
+          oldScore: logContext.oldScore,
+          newScore: logContext.newScore,
+          finalScore,
+          isPassed
+      });
+  } else {
+      logger.info('USER_ACTION', 'Admin graded/updated quiz result', { resultId, finalScore, isPassed });
+  }
 };

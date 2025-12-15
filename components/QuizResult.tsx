@@ -5,6 +5,7 @@ import { getQuizConfig, gradeQuizResult, getQuestionsByIds } from '../services/s
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
 import { useToast } from './Toast';
+import { sanitizeHTML } from '../utils/sanitize';
 
 interface QuizResultProps {
   result: QuizResult;
@@ -30,14 +31,16 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
           const uniqueIds = Array.from(new Set(questionIds));
           
           if (uniqueIds.length > 0) {
-              const questions = await getQuestionsByIds(uniqueIds);
+              // Pass true to includeDeleted to ensure we can see historical questions
+              const questions = await getQuestionsByIds(uniqueIds, true);
               setAllQuestions(questions);
           } else {
               setAllQuestions([]);
           }
 
           if (!config && result.configId) {
-              const conf = await getQuizConfig(result.configId);
+              // Include deleted configs for historical review
+              const conf = await getQuizConfig(result.configId, true);
               setConfig(conf);
           }
           
@@ -101,7 +104,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
                   return (
                       <div className="flex flex-wrap gap-2">
                           {parsed.map((item, i) => (
-                              <span key={i} className="inline-block px-2 py-0.5 rounded border border-gray-300 bg-white/80 rich-text-content" dangerouslySetInnerHTML={{ __html: item }} />
+                              <span key={i} className="inline-block px-2 py-0.5 rounded border border-gray-300 bg-white/80 rich-text-content" dangerouslySetInnerHTML={{ __html: sanitizeHTML(item) }} />
                           ))}
                       </div>
                   );
@@ -111,7 +114,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
           // Fallback to normal render
       }
   
-      return <div className="rich-text-content inline-block" dangerouslySetInnerHTML={{ __html: content }} />;
+      return <div className="rich-text-content inline-block" dangerouslySetInnerHTML={{ __html: sanitizeHTML(content) }} />;
     };
 
   // Helper to normalize HTML content for comparison
@@ -197,13 +200,35 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
 
       setLocalResult(updatedResult);
       
-      await gradeQuizResult(localResult.id, newAttempts, finalScore, newIsPassed);
-      
-      const nextEdits = { ...editingScores };
-      delete nextEdits[idx];
-      setEditingScores(nextEdits);
-      
-      setIsSaving(false);
+      const oldScore = localResult.attempts[idx].score || 0;
+
+      try {
+          await gradeQuizResult(
+              localResult.id, 
+              newAttempts, 
+              finalScore, 
+              newIsPassed, 
+              {
+                  type: 'SINGLE_UPDATE',
+                  questionId: attempt.questionId,
+                  oldScore: oldScore,
+                  newScore: newScore
+              }
+          );
+          
+          const nextEdits = { ...editingScores };
+          delete nextEdits[idx];
+          setEditingScores(nextEdits);
+          addToast('分数修改成功', 'success');
+      } catch (error) {
+          console.error('Failed to save score:', error);
+          addToast('保存分数失败', 'error');
+          // Revert local state if needed, or just let user try again.
+          // For now, we leave the local state as is, assuming user might try again.
+          // Ideally we should revert, but localResult is just UI state here.
+      } finally {
+          setIsSaving(false);
+      }
   };
 
   if (isAdmin && isLoading) {
@@ -336,7 +361,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
                                          </div>
                                      )}
                                      <div className="font-medium text-gray-900 mb-2 ql-editor" style={{ padding: 0 }}>
-                                        <div dangerouslySetInnerHTML={{ __html: questionText }} />
+                                        <div dangerouslySetInnerHTML={{ __html: sanitizeHTML(questionText) }} />
                                         {isDeleted && <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-50 text-red-700 border border-red-200">
                                            该题目已删除
                                         </span>}
@@ -433,7 +458,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
                                                 return (
                                                     <div key={i} className={`flex items-center p-3 border rounded-lg ${borderClass} ${bgClass}`}>
                                                         <span className="font-bold text-gray-500 mr-3">{label}.</span>
-                                                        <div className="rich-text-content flex-1" dangerouslySetInnerHTML={{ __html: opt }} />
+                                                        <div className="rich-text-content flex-1" dangerouslySetInnerHTML={{ __html: sanitizeHTML(opt) }} />
                                                         {icon}
                                                     </div>
                                                 );
@@ -444,7 +469,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
                                      <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-100 text-sm text-blue-800">
                                          <span className="font-bold mr-1">💡 解析:</span>
                                          {explanation && explanation.trim() !== '' && explanation !== '<p><br></p>' ? (
-                                             <div className="ql-editor rich-text-content inline-block align-top" style={{ padding: 0 }} dangerouslySetInnerHTML={{ __html: explanation }} />
+                                             <div className="ql-editor rich-text-content inline-block align-top" style={{ padding: 0 }} dangerouslySetInnerHTML={{ __html: sanitizeHTML(explanation) }} />
                                          ) : (
                                              <span>无</span>
                                          )}

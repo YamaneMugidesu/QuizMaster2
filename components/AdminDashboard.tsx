@@ -1,14 +1,17 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Question, QuestionType, Difficulty, GradeLevel, QuestionFormData, UserRole, QuizResult, User, SUBJECTS, QuizConfig, QuestionCategory } from '../types';
-import { saveQuestion, updateQuestion, deleteQuestion, toggleQuestionVisibility, deleteQuizResult } from '../services/storageService';
-import { useQuestions, useQuizConfigs, useAllResults, mutateQuestions, mutateQuizConfigs, mutateResults } from '../hooks/useData';
+import { saveQuestion, updateQuestion, deleteQuestion, toggleQuestionVisibility, deleteQuizResult, restoreQuestion, hardDeleteQuestion } from '../services/storageService';
+import { useQuestions, useQuizConfigs, useAllResults, mutateQuestions, mutateQuizConfigs, mutateResults, mutateUsers } from '../hooks/useData';
 import { Button } from './Button';
 import { QuestionForm } from './QuestionForm';
 import { UserManagement } from './UserManagement';
 import { QuizConfigForm } from './QuizConfigForm';
 import { ImageWithPreview } from './ImageWithPreview';
 import { GradingModal } from './GradingModal';
+import { useToast } from './Toast';
+import { sanitizeHTML } from '../utils/sanitize';
+import SystemMonitor from './SystemMonitor';
 
 interface AdminDashboardProps {
   currentUser: User;
@@ -16,8 +19,9 @@ interface AdminDashboardProps {
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onViewResult }) => {
+  const { addToast } = useToast();
   // Tabs
-  const [activeTab, setActiveTab] = useState<'list' | 'create' | 'records' | 'config' | 'users'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'create' | 'records' | 'config' | 'users' | 'monitor'>('list');
   
   // --- QUESTIONS STATE ---
   const [currentQuestionPage, setCurrentQuestionPage] = useState(1);
@@ -31,6 +35,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   const [filterType, setFilterType] = useState('');
   const [filterDifficulty, setFilterDifficulty] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
+  const [showRecycleBin, setShowRecycleBin] = useState(false);
 
   // Debounce Search
   useEffect(() => {
@@ -49,8 +54,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       gradeLevel: filterGrade as GradeLevel,
       type: filterType as QuestionType,
       difficulty: filterDifficulty as Difficulty,
-      category: filterCategory as QuestionCategory
-  });
+      category: filterCategory as QuestionCategory,
+      isDeleted: showRecycleBin
+  }, activeTab === 'list' || activeTab === 'create'); // Only fetch when in question list or create (create might need duplicate check but strictly list is main consumer)
 
   // --- RECORDS STATE ---
   const [currentPage, setCurrentPage] = useState(1);
@@ -69,10 +75,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       results: userResults,
       total: totalUserResults,
       isLoading: isResultsLoading
-  } = useAllResults(currentPage, itemsPerPage, debouncedUserSearchTerm);
+  } = useAllResults(currentPage, itemsPerPage, debouncedUserSearchTerm, activeTab === 'records');
 
   // --- CONFIGS STATE ---
-  const { configs: quizConfigs } = useQuizConfigs();
+  const { configs: quizConfigs } = useQuizConfigs(activeTab === 'config' || activeTab === 'records'); // Records tab needs configs for names if not snapshotted (though we fixed that, still safe)
 
   // Reset pagination when filters change
   useEffect(() => {
@@ -89,11 +95,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   // Delete Confirmation Modal State
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
   const [recordToDelete, setRecordToDelete] = useState<string | null>(null);
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
   // Grading Modal State
   const [gradingResult, setGradingResult] = useState<QuizResult | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleCreate = async (data: QuestionFormData) => {
+    setIsProcessing(true);
     const newQ: Question = {
       id: Math.random().toString(36).substr(2, 9),
       type: data.type,
@@ -110,13 +119,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       createdAt: Date.now(),
       isDisabled: false
     };
-    await saveQuestion(newQ);
-    mutateQuestions();
-    setActiveTab('list');
+    try {
+      await saveQuestion(newQ);
+      mutateQuestions();
+      setActiveTab('list');
+      addToast('题目创建成功', 'success');
+    } catch (error) {
+      console.error('Failed to create question:', error);
+      addToast('创建题目失败，请重试', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleSaveAndContinue = async (data: QuestionFormData) => {
+    setIsProcessing(true);
+    const newQ: Question = {
+      id: Math.random().toString(36).substr(2, 9),
+      type: data.type,
+      text: data.text,
+      imageUrls: data.imageUrls,
+      options: data.options,
+      correctAnswer: data.correctAnswer,
+      subject: data.subject,
+      difficulty: data.difficulty,
+      gradeLevel: data.gradeLevel,
+      category: data.category,
+      needsGrading: data.needsGrading,
+      explanation: data.explanation,
+      createdAt: Date.now(),
+      isDisabled: false
+    };
+    try {
+      await saveQuestion(newQ);
+      mutateQuestions();
+      addToast('题目已保存，请继续添加下一题', 'success');
+    } catch (error) {
+      console.error('Failed to create question:', error);
+      addToast('创建题目失败，请重试', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleUpdate = async (data: QuestionFormData) => {
     if (!editingQuestion) return;
+    setIsProcessing(true);
     
     const updatedQ: Question = {
       ...editingQuestion,
@@ -133,9 +181,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       explanation: data.explanation
     };
     
-    await updateQuestion(updatedQ);
-    mutateQuestions();
-    setEditingQuestion(null);
+    try {
+      await updateQuestion(updatedQ);
+      mutateQuestions();
+      setEditingQuestion(null);
+      addToast('题目更新成功', 'success');
+    } catch (error) {
+      console.error('Failed to update question:', error);
+      addToast('更新题目失败，请重试', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const initiateDelete = (e: React.MouseEvent, id: string) => {
@@ -146,8 +202,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
 
   const confirmDelete = async () => {
     if (questionToDelete) {
-      await deleteQuestion(questionToDelete);
-      mutateQuestions();
+      setIsProcessing(true);
+      try {
+        await deleteQuestion(questionToDelete);
+        mutateQuestions();
+        addToast('题目已删除', 'success');
+      } catch (error) {
+        console.error('Failed to delete question:', error);
+        addToast('删除题目失败', 'error');
+      } finally {
+        setIsProcessing(false);
+      }
       setQuestionToDelete(null);
     }
   };
@@ -155,8 +220,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   const handleToggleDisable = async (e: React.MouseEvent, id: string) => {
     e.preventDefault();
     e.stopPropagation();
-    await toggleQuestionVisibility(id);
-    mutateQuestions();
+    setIsProcessing(true);
+    try {
+      await toggleQuestionVisibility(id);
+      mutateQuestions();
+    } catch (error) {
+      console.error('Failed to toggle visibility:', error);
+      addToast('操作失败', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const resetFilters = () => {
@@ -181,12 +254,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   
   const confirmDeleteRecord = async () => {
       if (recordToDelete) {
+          setIsProcessing(true);
           try {
               await deleteQuizResult(recordToDelete);
               mutateResults();
+              addToast('记录已删除', 'success');
           } catch (error) {
               console.error('Failed to delete record:', error);
-              alert('删除记录失败');
+              addToast('删除记录失败', 'error');
+          } finally {
+              setIsProcessing(false);
           }
           setRecordToDelete(null);
       }
@@ -256,12 +333,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   const totalQuestionPages = Math.ceil(totalQuestions / questionsPerPage);
   const totalPages = Math.ceil(totalUserResults / itemsPerPage);
 
+  const handleRestoreQuestion = async (id: string) => {
+    setProcessingId(id);
+    try {
+      await restoreQuestion(id);
+      mutateQuestions();
+      addToast('题目已恢复', 'success');
+    } catch (error) {
+      console.error('Failed to restore question:', error);
+      addToast('恢复失败', 'error');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleHardDeleteQuestion = async (id: string) => {
+    if (window.confirm('确定要永久删除这道题目吗？此操作无法撤销！')) {
+      setProcessingId(id);
+      try {
+        await hardDeleteQuestion(id);
+        mutateQuestions();
+        addToast('题目已永久删除', 'success');
+      } catch (error) {
+        console.error('Failed to hard delete question:', error);
+        addToast('删除失败', 'error');
+      } finally {
+        setProcessingId(null);
+      }
+    }
+  };
+
   const refreshData = async () => {
       if (activeTab === 'list') {
           mutateQuestions();
       } else if (activeTab === 'records') {
           mutateResults();
+      } else if (activeTab === 'users') {
+          mutateUsers();
       }
+      // Monitor refreshes itself
   };
 
   if (isQuestionsLoading && activeTab === 'list' && questions.length === 0) {
@@ -327,12 +437,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                 用户管理
             </Button>
           )}
+
+          {currentUser.role === UserRole.SUPER_ADMIN && (
+            <Button
+                variant={activeTab === 'monitor' ? 'primary' : 'ghost'}
+                onClick={() => setActiveTab('monitor')}
+                className="text-sm whitespace-nowrap"
+            >
+                系统监控
+            </Button>
+          )}
         </div>
       </div>
 
       {activeTab === 'create' && (
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100 animate-fade-in">
-           <QuestionForm onSubmit={handleCreate} submitLabel="创建题目" />
+           <QuestionForm 
+             onSubmit={handleCreate} 
+             onSaveAndContinue={handleSaveAndContinue}
+             submitLabel="创建题目" 
+             isLoading={isProcessing} 
+           />
         </div>
       )}
 
@@ -344,19 +469,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
           <UserManagement />
       )}
 
+      {activeTab === 'monitor' && currentUser.role === UserRole.SUPER_ADMIN && (
+          <SystemMonitor />
+      )}
+
       {activeTab === 'list' && (
         <div className="space-y-4 animate-fade-in">
             {/* Filter Bar */}
             <div className="bg-white rounded-xl shadow border border-gray-100 p-4">
                 <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
-                    <div className="md:col-span-2">
+                    <div className="md:col-span-2 flex gap-2">
                          <input 
                             type="text"
                             placeholder="搜索题目关键字..."
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 text-sm"
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 text-sm"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                          />
+                         <button 
+                             onClick={() => {
+                                 setShowRecycleBin(!showRecycleBin);
+                                 setCurrentQuestionPage(1);
+                             }} 
+                             className={`px-3 py-2 border rounded-md transition-colors flex items-center justify-center ${
+                                 showRecycleBin 
+                                 ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' 
+                                 : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-50 hover:text-gray-700'
+                             }`}
+                             title={showRecycleBin ? "返回列表" : "回收站"}
+                         >
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                         </button>
                     </div>
                     <select 
                         className="px-3 py-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-primary-500 text-sm bg-white"
@@ -407,10 +552,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                         {Object.values(QuestionCategory).map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                 </div>
-                {(searchTerm || filterSubject || filterGrade || filterType || filterDifficulty || filterCategory) && (
+                {(searchTerm || filterSubject || filterGrade || filterType || filterDifficulty || filterCategory || showRecycleBin) && (
                     <div className="mt-3 flex justify-between items-center text-sm">
-                        <span className="text-gray-500">共找到 {totalQuestions} 个符合条件的题目</span>
-                        <button onClick={resetFilters} className="text-primary-600 hover:text-primary-800 font-medium">清空筛选</button>
+                        <span className="text-gray-500">
+                            {showRecycleBin ? '回收站中 ' : '共找到 '} 
+                            {totalQuestions} 个{showRecycleBin ? '已删除题目' : '符合条件的题目'}
+                        </span>
+                        {!showRecycleBin && <button onClick={resetFilters} className="text-primary-600 hover:text-primary-800 font-medium">清空筛选</button>}
                     </div>
                 )}
             </div>
@@ -460,7 +608,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                                     </span>
                                 )}
                             </div>
-                            <div className="text-lg font-medium text-gray-900 line-clamp-2 rich-text-content" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} dangerouslySetInnerHTML={{ __html: q.text }}></div>
+                            <div className="text-lg font-medium text-gray-900 line-clamp-2 rich-text-content" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} dangerouslySetInnerHTML={{ __html: sanitizeHTML(q.text) }}></div>
                             <div className="text-sm text-gray-500 mt-1 flex items-start">
                                 <span className="flex-shrink-0 mt-0.5">答案: </span>
                                 {q.type === QuestionType.FILL_IN_THE_BLANK ? (
@@ -474,7 +622,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                                                             {answers.map((ans, idx) => (
                                                                 <span key={idx} className="mr-2">
                                                                     <span className="text-gray-400 text-xs">({idx + 1})</span>
-                                                                    <span dangerouslySetInnerHTML={{ __html: ans }} className="inline-block align-middle rich-text-content-inline" />
+                                                                    <span dangerouslySetInnerHTML={{ __html: sanitizeHTML(ans) }} className="inline-block align-middle rich-text-content-inline" />
                                                                 </span>
                                                             ))}
                                                         </div>
@@ -492,7 +640,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                                             try {
                                                 const answers = JSON.parse(q.correctAnswer);
                                                 return Array.isArray(answers) ? answers.map((ans: string, idx: number) => (
-                                                    <div key={idx} className="font-semibold text-green-600 bg-green-50 px-2 rounded border border-green-100 rich-text-content inline-block text-xs" dangerouslySetInnerHTML={{ __html: ans }} />
+                                                    <div key={idx} className="font-semibold text-green-600 bg-green-50 px-2 rounded border border-green-100 rich-text-content inline-block text-xs" dangerouslySetInnerHTML={{ __html: sanitizeHTML(ans) }} />
                                                 )) : <span className="text-red-500">格式错误</span>;
                                             } catch {
                                                 return <span className="font-semibold text-green-600 ml-1">{q.correctAnswer}</span>;
@@ -503,45 +651,74 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                                     <div 
                                         className="font-semibold text-green-600 ml-1 rich-text-content flex-1 min-w-0 break-words line-clamp-2" 
                                         style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
-                                        dangerouslySetInnerHTML={{ __html: q.correctAnswer }} 
+                                        dangerouslySetInnerHTML={{ __html: sanitizeHTML(q.correctAnswer) }} 
                                     />
                                 )}
                             </div>
                         </div>
                         <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                        <Button 
-                                type="button"
-                                variant="secondary" 
-                                className="text-sm py-1 px-3"
-                                title={q.isDisabled ? "启用题目" : "屏蔽题目"}
-                                onClick={(e) => handleToggleDisable(e, q.id)}
-                        >
-                                {q.isDisabled ? (
-                                    <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                ) : (
-                                    <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                                    </svg>
-                                )}
-                        </Button>
-                        <Button 
-                                type="button"
-                                variant="secondary" 
-                                className="text-sm py-1 px-3" 
-                                onClick={(e) => { e.stopPropagation(); setEditingQuestion(q); }}
-                            >
-                                修改
-                            </Button>
-                            <Button 
-                                type="button"
-                                variant="danger" 
-                                className="text-sm py-1 px-3" 
-                                onClick={(e) => initiateDelete(e, q.id)}
-                            >
-                                删除
-                            </Button>
+                        {processingId === q.id ? (
+                             <svg className="w-5 h-5 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        ) : (
+                            <>
+                            {showRecycleBin ? (
+                                <>
+                                    <Button 
+                                        type="button"
+                                        variant="secondary" 
+                                        className="text-sm py-1 px-3 text-green-600 hover:text-green-700 bg-green-50 hover:bg-green-100 border-green-200"
+                                        onClick={(e) => { e.stopPropagation(); handleRestoreQuestion(q.id); }}
+                                    >
+                                        恢复
+                                    </Button>
+                                    <Button 
+                                        type="button"
+                                        variant="danger" 
+                                        className="text-sm py-1 px-3" 
+                                        onClick={(e) => { e.stopPropagation(); handleHardDeleteQuestion(q.id); }}
+                                    >
+                                        永久删除
+                                    </Button>
+                                </>
+                            ) : (
+                                <>
+                                    <Button 
+                                            type="button"
+                                            variant="secondary" 
+                                            className="text-sm py-1 px-3"
+                                            title={q.isDisabled ? "启用题目" : "屏蔽题目"}
+                                            onClick={(e) => handleToggleDisable(e, q.id)}
+                                    >
+                                            {q.isDisabled ? (
+                                                <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                            ) : (
+                                                <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                                                </svg>
+                                            )}
+                                    </Button>
+                                    <Button 
+                                            type="button"
+                                            variant="secondary" 
+                                            className="text-sm py-1 px-3" 
+                                            onClick={(e) => { e.stopPropagation(); setEditingQuestion(q); }}
+                                        >
+                                            修改
+                                        </Button>
+                                        <Button 
+                                            type="button"
+                                            variant="danger" 
+                                            className="text-sm py-1 px-3" 
+                                            onClick={(e) => initiateDelete(e, q.id)}
+                                        >
+                                            删除
+                                        </Button>
+                                </>
+                            )}
+                            </>
+                        )}
                         </div>
                     </div>
                     </li>
@@ -659,7 +836,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                                  {result.username}
                               </td>
                               <td className="px-6 py-4 text-sm text-gray-600 font-medium">
-                                 {quizConfigs.find(c => c.id === result.configId)?.name || '未知试卷'}
+                                 {result.configName || quizConfigs.find(c => c.id === result.configId)?.name || '未知试卷'}
                               </td>
                               <td className="px-6 py-4 text-sm text-gray-600">
                                  {new Date(result.timestamp).toLocaleString('zh-CN')}
@@ -788,6 +965,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                     onSubmit={handleUpdate} 
                     onCancel={() => setEditingQuestion(null)}
                     submitLabel="更新题目"
+                    isLoading={isProcessing}
                 />
              </div>
           </div>
@@ -802,7 +980,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                 <p className="text-gray-500 mb-6">您确定要删除这道题目吗？删除后无法恢复。</p>
                 <div className="flex justify-end gap-3">
                     <Button variant="secondary" onClick={() => setQuestionToDelete(null)}>取消</Button>
-                    <Button variant="danger" onClick={confirmDelete}>确认删除</Button>
+                    <Button variant="danger" onClick={confirmDelete} isLoading={isProcessing}>确认删除</Button>
                 </div>
             </div>
         </div>
@@ -816,7 +994,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                 <p className="text-gray-500 mb-6">您确定要删除这条答题记录吗？删除后无法恢复。</p>
                 <div className="flex justify-end gap-3">
                     <Button variant="secondary" onClick={() => setRecordToDelete(null)}>取消</Button>
-                    <Button variant="danger" onClick={confirmDeleteRecord}>确认删除</Button>
+                    <Button variant="danger" onClick={confirmDeleteRecord} isLoading={isProcessing}>确认删除</Button>
                 </div>
             </div>
         </div>

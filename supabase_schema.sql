@@ -59,16 +59,30 @@ alter table public.quiz_configs enable row level security;
 alter table public.quiz_results enable row level security;
 
 -- Policies
+-- Helper Functions
+create or replace function public.is_super_admin()
+returns boolean as $$
+begin
+  return exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'SUPER_ADMIN'
+  );
+end;
+$$ language plpgsql security definer set search_path = public;
+
 -- Profiles: Everyone can view, Users can insert/update their own
 create policy "Public profiles are viewable by everyone" on public.profiles for select using (true);
-create policy "Users can insert their own profile" on public.profiles for insert with check (auth.uid() = id);
-create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
+create policy "Users can insert their own profile" on public.profiles for insert with check ( (select auth.uid()) = id );
+create policy "Users update own or Super Admin updates all" on public.profiles for update
+using ( ((select auth.uid()) = id) OR (select public.is_super_admin()) );
+create policy "Super Admins can delete any profile" on public.profiles for delete
+using ( (select public.is_super_admin()) );
 
 -- Questions: Authenticated users can view, only specific roles should edit (simplified to auth users for now or implement role check)
 create policy "Enable read access for all users" on public.questions for select using (true);
-create policy "Enable insert for authenticated users only" on public.questions for insert with check (auth.role() = 'authenticated');
-create policy "Enable update for authenticated users only" on public.questions for update using (auth.role() = 'authenticated');
-create policy "Enable delete for authenticated users only" on public.questions for delete using (auth.role() = 'authenticated');
+create policy "Enable insert for authenticated users only" on public.questions for insert with check ( (select auth.role()) = 'authenticated' );
+create policy "Enable update for authenticated users only" on public.questions for update using ( (select auth.role()) = 'authenticated' );
+create policy "Enable delete for authenticated users only" on public.questions for delete using ( (select auth.role()) = 'authenticated' );
 
 -- Configs: Public read
 create policy "Enable all access for configs" on public.quiz_configs for all using (true);
@@ -84,7 +98,7 @@ begin
   values (new.id, new.raw_user_meta_data->>'username', 'USER', extract(epoch from now()) * 1000);
   return new;
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = public;
 
 create trigger on_auth_user_created
   after insert on auth.users
@@ -115,3 +129,29 @@ create policy "Write access for admins" on public.system_settings for all using 
 insert into public.system_settings (key, value, updated_at)
 values ('allow_registration', 'true', extract(epoch from now()) * 1000)
 on conflict (key) do nothing;
+
+-- 9. System Logs Table (Monitoring & Audit)
+create table if not exists public.system_logs (
+  id uuid default uuid_generate_v4() primary key,
+  level text not null check (level in ('INFO', 'WARNING', 'ERROR', 'CRITICAL')),
+  category text not null,
+  message text not null,
+  details jsonb,
+  user_id uuid references public.profiles(id),
+  created_at bigint not null,
+  is_resolved boolean default false
+);
+
+alter table public.system_logs enable row level security;
+
+create policy "Enable insert for all users" on public.system_logs
+  for insert with check ( true );
+
+create policy "Enable select for super admins only" on public.system_logs
+  for select using ( (select public.is_super_admin()) );
+
+create policy "Enable update for super admins only" on public.system_logs
+  for update using ( (select public.is_super_admin()) );
+
+create policy "Enable delete for super admins only" on public.system_logs
+  for delete using ( (select public.is_super_admin()) );

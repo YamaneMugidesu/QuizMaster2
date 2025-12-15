@@ -5,6 +5,7 @@ import { generateQuiz, gradeQuiz } from '../services/storageService';
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
 import { useToast } from './Toast';
+import { sanitizeHTML } from '../utils/sanitize';
 
 const STORAGE_KEY_PREFIX = 'quiz_autosave_';
 
@@ -62,11 +63,17 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
         }
 
         // Load quiz based on specific configuration ID (if no save found)
-        const { questions: quizQuestions, configName: name, passingScore: pScore } = await generateQuiz(configId); 
-        setQuestions(quizQuestions);
-        setConfigName(name);
-        setPassingScore(pScore);
-        setIsLoading(false);
+        try {
+            const { questions: quizQuestions, configName: name, passingScore: pScore } = await generateQuiz(configId); 
+            setQuestions(quizQuestions);
+            setConfigName(name);
+            setPassingScore(pScore);
+        } catch (error) {
+            console.error("Failed to generate quiz:", error);
+            addToast("无法加载试卷，请稍后重试", "error");
+        } finally {
+            setIsLoading(false);
+        }
     };
     load();
   }, [configId]);
@@ -74,15 +81,19 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
   // Auto-save effect
   useEffect(() => {
       if (!isLoading && questions.length > 0) {
-          const session: SavedSession = {
-              questions,
-              answers,
-              configName,
-              passingScore,
-              timestamp: Date.now(),
-              startTime: startTime.current
-          };
-          localStorage.setItem(STORAGE_KEY_PREFIX + configId, JSON.stringify(session));
+          const handler = setTimeout(() => {
+              const session: SavedSession = {
+                  questions,
+                  answers,
+                  configName,
+                  passingScore,
+                  timestamp: Date.now(),
+                  startTime: startTime.current
+              };
+              localStorage.setItem(STORAGE_KEY_PREFIX + configId, JSON.stringify(session));
+          }, 1000);
+
+          return () => clearTimeout(handler);
       }
   }, [answers, questions, configName, passingScore, isLoading, configId]);
 
@@ -351,7 +362,7 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
           <h2 
             className="text-2xl text-gray-900 mb-8 ql-editor rich-text-content" 
             style={{ padding: 0 }}
-            dangerouslySetInnerHTML={{ __html: currentQ.text }} 
+            dangerouslySetInnerHTML={{ __html: sanitizeHTML(currentQ.text) }} 
           />
 
           <div className="space-y-4">
@@ -374,7 +385,7 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
                             {currentQ.type === QuestionType.MULTIPLE_CHOICE && (
                                 <span className="font-bold mr-2 mt-0.5">{String.fromCharCode(65 + idx)}.</span>
                             )}
-                            <span className="font-medium text-gray-700 rich-text-content" dangerouslySetInnerHTML={{ __html: opt }} />
+                            <span className="font-medium text-gray-700 rich-text-content" dangerouslySetInnerHTML={{ __html: sanitizeHTML(opt) }} />
                           </div>
                       </label>
                   ))}
@@ -397,7 +408,7 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
                                 />
                                 <div className="ml-3 flex items-start">
                                     <span className="font-bold mr-2 mt-0.5">{String.fromCharCode(65 + idx)}.</span>
-                                    <span className="font-medium text-gray-700 rich-text-content" dangerouslySetInnerHTML={{ __html: opt }} />
+                                    <span className="font-medium text-gray-700 rich-text-content" dangerouslySetInnerHTML={{ __html: sanitizeHTML(opt) }} />
                                 </div>
                             </label>
                         )

@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { QuizConfig, QuizPartConfig, Difficulty, QuestionType, GradeLevel, QuestionCategory } from '../types';
-import { getQuizConfigs, saveQuizConfig, deleteQuizConfig, getAvailableQuestionCount, toggleQuizConfigVisibility } from '../services/storageService';
+import { saveQuizConfig, deleteQuizConfig, getAvailableQuestionCount, toggleQuizConfigVisibility, restoreQuizConfig, hardDeleteQuizConfig } from '../services/storageService';
+import { useQuizConfigs, mutateQuizConfigs } from '../hooks/useData';
 import { Button } from './Button';
 import { useToast } from './Toast';
 
@@ -35,16 +36,25 @@ const CATEGORIES = [
 ];
 
 export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
-    const [configs, setConfigs] = useState<QuizConfig[]>([]);
+    const [showRecycleBin, setShowRecycleBin] = useState(false);
+    const { configs, isLoading: isConfigsLoading, mutate } = useQuizConfigs(true, false, showRecycleBin);
     const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
     const [activeConfig, setActiveConfig] = useState<QuizConfig | null>(null);
     const [availability, setAvailability] = useState<number[]>([]);
     const [isSaving, setIsSaving] = useState(false);
+    const [isCreating, setIsCreating] = useState(false);
+    const [processingId, setProcessingId] = useState<string | null>(null);
     const { addToast } = useToast();
 
     useEffect(() => {
-        loadConfigs();
-    }, []);
+        if (configs.length > 0) {
+            if (!selectedConfigId || !configs.find(c => c.id === selectedConfigId)) {
+                setSelectedConfigId(configs[0].id);
+            }
+        } else {
+            setSelectedConfigId(null);
+        }
+    }, [configs, selectedConfigId]);
 
     useEffect(() => {
         if (selectedConfigId) {
@@ -61,59 +71,123 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
         }
     }, [selectedConfigId, configs]);
 
-    const loadConfigs = async () => {
-        const list = await getQuizConfigs();
-        setConfigs(list);
-        if (list.length > 0 && !selectedConfigId) {
-            setSelectedConfigId(list[0].id);
-        }
-    };
-
     const handleCreateConfig = async () => {
-        const newConfig: QuizConfig = {
-            id: Math.random().toString(36).substr(2, 9),
-            name: '新试卷配置',
-            description: '这是一份新的试卷配置',
-            totalQuestions: 0,
-            passingScore: 0,
-            createdAt: Date.now(),
-            parts: [],
-            quizMode: 'practice'
-        };
-        await saveQuizConfig(newConfig);
-        await loadConfigs();
-        setSelectedConfigId(newConfig.id);
+        setIsCreating(true);
+        try {
+            const newConfig: QuizConfig = {
+                id: Math.random().toString(36).substr(2, 9),
+                name: '新试卷配置',
+                description: '这是一份新的试卷配置',
+                totalQuestions: 0,
+                passingScore: 0,
+                createdAt: Date.now(),
+                parts: [],
+                quizMode: 'practice'
+            };
+            await saveQuizConfig(newConfig);
+            mutateQuizConfigs();
+            setSelectedConfigId(newConfig.id);
+            addToast('新试卷配置已创建', 'success');
+        } catch (error) {
+            console.error('Failed to create config:', error);
+            addToast('创建失败，请重试', 'error');
+        } finally {
+            setIsCreating(false);
+        }
     };
 
     const handleDeleteConfig = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
         if (window.confirm('确定要删除这份试卷配置吗？')) {
-            await deleteQuizConfig(id);
+            setProcessingId(id);
+            try {
+                await deleteQuizConfig(id);
+                mutateQuizConfigs();
+                const remaining = configs.filter(c => c.id !== id);
+                if (selectedConfigId === id) {
+                    setSelectedConfigId(remaining.length > 0 ? remaining[0].id : null);
+                }
+                addToast('试卷配置已删除', 'success');
+            } catch (error) {
+                console.error('Failed to delete config:', error);
+                addToast('删除失败，请重试', 'error');
+            } finally {
+                setProcessingId(null);
+            }
+        }
+    };
+
+    const handleRestoreConfig = async (id: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setProcessingId(id);
+        try {
+            await restoreQuizConfig(id);
+            mutateQuizConfigs();
+            // Don't need to manually update selectedConfigId here as useEffect handles it, 
+            // but for immediate feedback we might want to switch if current one disappears from list?
+            // Actually, if we restore, it disappears from "Deleted" list.
             const remaining = configs.filter(c => c.id !== id);
-            setConfigs(remaining);
             if (selectedConfigId === id) {
                 setSelectedConfigId(remaining.length > 0 ? remaining[0].id : null);
+            }
+            addToast('试卷配置已恢复', 'success');
+        } catch (error) {
+            console.error('Failed to restore config:', error);
+            addToast('恢复失败，请重试', 'error');
+        } finally {
+            setProcessingId(null);
+        }
+    };
+
+    const handleHardDeleteConfig = async (id: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (window.confirm('确定要永久删除这份试卷配置吗？此操作无法撤销！')) {
+            setProcessingId(id);
+            try {
+                await hardDeleteQuizConfig(id);
+                mutateQuizConfigs();
+                const remaining = configs.filter(c => c.id !== id);
+                if (selectedConfigId === id) {
+                    setSelectedConfigId(remaining.length > 0 ? remaining[0].id : null);
+                }
+                addToast('试卷配置已永久删除', 'success');
+            } catch (error) {
+                console.error('Failed to hard delete config:', error);
+                addToast('删除失败，请重试', 'error');
+            } finally {
+                setProcessingId(null);
             }
         }
     };
 
     const handleTogglePublish = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
-        await toggleQuizConfigVisibility(id);
-        const updated = configs.map(c => c.id === id ? { ...c, isPublished: !c.isPublished } : c);
-        setConfigs(updated);
-        if (selectedConfigId === id && activeConfig) {
-            setActiveConfig({ ...activeConfig, isPublished: !activeConfig.isPublished });
+        setProcessingId(id);
+        try {
+            await toggleQuizConfigVisibility(id);
+            mutateQuizConfigs();
+            addToast('状态已更新', 'success');
+        } catch (error) {
+            console.error('Failed to toggle publish status:', error);
+            addToast('状态更新失败', 'error');
+        } finally {
+            setProcessingId(null);
         }
     };
 
     const checkAvailability = async (parts: QuizPartConfig[]) => {
-        // We can run these in parallel
-        const promises = parts.map(part => 
-             getAvailableQuestionCount(part.subjects, part.difficulties, part.gradeLevels, part.questionTypes, part.categories)
-        );
-        const counts = await Promise.all(promises);
-        setAvailability(counts);
+        try {
+            // We can run these in parallel
+            const promises = parts.map(part => 
+                 getAvailableQuestionCount(part.subjects, part.difficulties, part.gradeLevels, part.questionTypes, part.categories)
+            );
+            const counts = await Promise.all(promises);
+            setAvailability(counts);
+        } catch (error) {
+            console.error('Failed to check availability:', error);
+            // Don't show toast here as it might spam the user while typing/editing
+            // But maybe set availability to 0 or indicator error
+        }
     };
 
     // --- Editor Logic ---
@@ -208,12 +282,17 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
             }
         }
         setIsSaving(true);
-        await saveQuizConfig(activeConfig);
-        // Update list specifically to reflect name changes etc.
-        await loadConfigs();
-        setIsSaving(false);
-        addToast('试卷配置已保存！', 'success');
-        if (onSave) onSave();
+        try {
+            await saveQuizConfig(activeConfig);
+            mutateQuizConfigs();
+            addToast('配置保存成功', 'success');
+            if (onSave) onSave();
+        } catch (error) {
+            console.error(error);
+            addToast('保存失败', 'error');
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     // --- UI Render Helpers ---
@@ -296,13 +375,30 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
             <div className="w-full md:w-1/4 bg-white rounded-xl shadow border border-gray-100 flex flex-col max-h-[700px]">
                 <div className="p-4 border-b border-gray-100 bg-gray-50 rounded-t-xl">
                     <div className="flex justify-between items-center mb-2">
-                        <h3 className="font-bold text-gray-800">试卷列表</h3>
+                        <h3 className="font-bold text-gray-800">
+                            {showRecycleBin ? '试卷回收站' : '试卷列表'}
+                        </h3>
                         <div className="flex gap-1">
-                            <Button variant="ghost" className="p-1 text-primary-600" onClick={handleCreateConfig} title="新建试卷">
-                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
-                            </Button>
-                            <Button variant="ghost" className="p-1 text-primary-600" onClick={loadConfigs} title="刷新列表">
-                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                            <button 
+                                onClick={() => setShowRecycleBin(!showRecycleBin)}
+                                className={`p-1 rounded hover:bg-gray-200 transition-colors ${showRecycleBin ? 'text-red-600 bg-red-50' : 'text-gray-400'}`}
+                                title={showRecycleBin ? "返回列表" : "回收站"}
+                            >
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </button>
+                            {!showRecycleBin && (
+                                <Button variant="ghost" className="p-1 text-primary-600" onClick={handleCreateConfig} title="新建试卷" disabled={isCreating}>
+                                    {isCreating ? (
+                                        <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                    ) : (
+                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+                                    )}
+                                </Button>
+                            )}
+                            <Button variant="ghost" className="p-1 text-primary-600" onClick={() => mutate()} title="刷新列表">
+                                <svg className={`w-5 h-5 ${isConfigsLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                             </Button>
                         </div>
                     </div>
@@ -311,8 +407,8 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
                     {configs.map(c => (
                         <div 
                             key={c.id} 
-                            onClick={() => setSelectedConfigId(c.id)}
-                            className={`p-3 rounded-lg cursor-pointer border transition-all group relative ${selectedConfigId === c.id ? 'bg-primary-50 border-primary-200 shadow-sm' : 'bg-white border-transparent hover:bg-gray-50 hover:border-gray-200'}`}
+                            onClick={() => !processingId && setSelectedConfigId(c.id)}
+                            className={`p-3 rounded-lg cursor-pointer border transition-all group relative ${selectedConfigId === c.id ? 'bg-primary-50 border-primary-200 shadow-sm' : 'bg-white border-transparent hover:bg-gray-50 hover:border-gray-200'} ${processingId === c.id ? 'opacity-50 pointer-events-none' : ''}`}
                         >
                             <h4 className={`font-bold text-sm mb-1 ${selectedConfigId === c.id ? 'text-primary-800' : 'text-gray-700'}`}>
                                 {c.name}
@@ -321,29 +417,56 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
                             <div className="flex justify-between items-center">
                                 <span className="text-xs text-gray-400">{c.totalQuestions} 道题</span>
                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button
-                                        onClick={(e) => handleTogglePublish(c.id, e)}
-                                        className={`p-1 hover:bg-gray-100 rounded ${c.isPublished ? 'text-green-500' : 'text-gray-400'}`}
-                                        title={c.isPublished ? "点击下架" : "点击上架"}
-                                    >
-                                        {c.isPublished ? (
-                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                            </svg>
-                                        ) : (
-                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                                            </svg>
-                                        )}
-                                    </button>
-                                    <button 
-                                        onClick={(e) => handleDeleteConfig(c.id, e)}
-                                        className="text-gray-300 hover:text-red-500 p-1"
-                                        title="删除"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                    </button>
+                                    {processingId === c.id ? (
+                                        <svg className="w-4 h-4 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                    ) : (
+                                        <>
+                                            {showRecycleBin ? (
+                                                <>
+                                                    <button 
+                                                        onClick={(e) => handleRestoreConfig(c.id, e)}
+                                                        className="text-green-500 hover:text-green-700 p-1"
+                                                        title="恢复"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                                                    </button>
+                                                    <button 
+                                                        onClick={(e) => handleHardDeleteConfig(c.id, e)}
+                                                        className="text-red-400 hover:text-red-600 p-1"
+                                                        title="永久删除"
+                                                    >
+                                                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <button
+                                                        onClick={(e) => handleTogglePublish(c.id, e)}
+                                                        className={`p-1 hover:bg-gray-100 rounded ${c.isPublished ? 'text-green-500' : 'text-gray-400'}`}
+                                                        title={c.isPublished ? "点击下架" : "点击上架"}
+                                                    >
+                                                        {c.isPublished ? (
+                                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                            </svg>
+                                                        ) : (
+                                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                                                            </svg>
+                                                        )}
+                                                    </button>
+                                                    <button 
+                                                        onClick={(e) => handleDeleteConfig(c.id, e)}
+                                                        className="text-gray-300 hover:text-red-500 p-1"
+                                                        title="删除"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    </button>
+                                                </>
+                                            )}
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -354,6 +477,39 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
             {/* Main Panel: Editor */}
             <div className="w-full md:w-3/4 bg-white rounded-xl shadow border border-gray-100 flex flex-col overflow-hidden max-h-[700px]">
                 {activeConfig ? (
+                    showRecycleBin ? (
+                        <div className="flex-1 flex flex-col items-center justify-center p-10 text-center animate-fade-in">
+                            <div className="bg-red-50 p-6 rounded-full mb-4">
+                                <svg className="w-12 h-12 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-800 mb-2">此试卷配置已删除</h3>
+                            <p className="text-gray-500 mb-6 max-w-md">
+                                您正在查看回收站中的试卷配置 "{activeConfig.name}"。<br/>
+                                如果需要编辑或使用此配置，请先将其恢复。
+                            </p>
+                            <div className="flex gap-3">
+                                <Button 
+                                    variant="secondary"
+                                    onClick={(e) => handleRestoreConfig(activeConfig.id, e)}
+                                    className="text-green-600 bg-green-50 hover:bg-green-100 border-green-200"
+                                    isLoading={processingId === activeConfig.id}
+                                    disabled={!!processingId}
+                                >
+                                    恢复配置
+                                </Button>
+                                <Button 
+                                    variant="danger"
+                                    onClick={(e) => handleHardDeleteConfig(activeConfig.id, e)}
+                                    isLoading={processingId === activeConfig.id}
+                                    disabled={!!processingId}
+                                >
+                                    永久删除
+                                </Button>
+                            </div>
+                        </div>
+                    ) : (
                     <>
                         <div className="p-6 border-b border-gray-100 flex justify-between items-start bg-gray-50">
                             <div className="flex-1 mr-8">
@@ -502,6 +658,7 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
                              </div>
                         </div>
                     </>
+                    )
                 ) : (
                     <div className="flex-1 flex items-center justify-center text-gray-400 flex-col">
                         <svg className="w-16 h-16 mb-4 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>

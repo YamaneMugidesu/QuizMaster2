@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient';
 import { QuizConfig, Question, QuestionType } from '../types';
 import { mapQuestionFromDB, getQuestionsByIds } from './questionService';
+import { logger } from './loggerService';
 
 // Internal DB Type
 interface DBConfig {
@@ -13,6 +14,7 @@ interface DBConfig {
     created_at: number;
     quiz_mode: string;
     is_published: boolean;
+    is_deleted?: boolean;
 }
 
 const mapConfigFromDB = (c: DBConfig): QuizConfig => ({
@@ -24,7 +26,8 @@ const mapConfigFromDB = (c: DBConfig): QuizConfig => ({
   totalQuestions: c.total_questions,
   createdAt: c.created_at,
   quizMode: (c.quiz_mode as any) || 'practice',
-  isPublished: c.is_published
+  isPublished: c.is_published,
+  isDeleted: c.is_deleted
 });
 
 // --- STATE ---
@@ -32,23 +35,57 @@ const mapConfigFromDB = (c: DBConfig): QuizConfig => ({
 
 // --- API ---
 
-export const getQuizConfigs = async (): Promise<QuizConfig[]> => {
-  const { data, error } = await supabase.from('quiz_configs').select('*').neq('is_deleted', true);
+export const getQuizConfigs = async (includeDeleted: boolean = false, onlyDeleted: boolean = false): Promise<QuizConfig[]> => {
+  let query = supabase.from('quiz_configs').select('*');
+  
+  if (onlyDeleted) {
+      query = query.eq('is_deleted', true);
+  } else if (!includeDeleted) {
+      query = query.neq('is_deleted', true);
+  }
+
+  const { data, error } = await query;
   if (error) {
     console.error('Error fetching configs:', error);
-    return [];
+    throw error;
   }
   
   const mapped = (data || []).map(item => mapConfigFromDB(item as DBConfig));
   return mapped;
 };
 
-export const getQuizConfig = async (id: string): Promise<QuizConfig | null> => {
-  const { data, error } = await supabase.from('quiz_configs').select('*').eq('id', id).single();
-  if (error || !data) {
-    if (error) console.error('Error fetching config:', error);
-    return null;
+export const restoreQuizConfig = async (id: string): Promise<void> => {
+    const { error } = await supabase.from('quiz_configs').update({ is_deleted: false }).eq('id', id);
+    if (error) {
+        logger.error('SYSTEM', 'Error restoring quiz config', { id }, error);
+        throw error;
+    }
+    logger.info('SYSTEM', 'Quiz config restored', { id });
+};
+
+export const hardDeleteQuizConfig = async (id: string): Promise<void> => {
+    const { error } = await supabase.from('quiz_configs').delete().eq('id', id);
+    if (error) {
+        logger.error('SYSTEM', 'Error hard deleting quiz config', { id }, error);
+        throw error;
+    }
+    logger.info('SYSTEM', 'Quiz config permanently deleted', { id });
+};
+
+export const getQuizConfig = async (id: string, includeDeleted: boolean = false): Promise<QuizConfig | null> => {
+  let query = supabase.from('quiz_configs').select('*').eq('id', id);
+  
+  if (!includeDeleted) {
+      query = query.neq('is_deleted', true);
   }
+
+  const { data, error } = await query.single();
+  
+  if (error) {
+    console.error('Error fetching config:', error);
+    throw error;
+  }
+  if (!data) return null;
   return mapConfigFromDB(data as DBConfig);
 };
 
@@ -67,30 +104,66 @@ export const saveQuizConfig = async (config: QuizConfig): Promise<void> => {
 
   if (id && id.length > 20) {
       const { error } = await supabase.from('quiz_configs').update(dbPayload).eq('id', id);
-      if(error) console.error(error);
+      if(error) {
+          logger.error('SYSTEM', 'Error updating quiz config', { configName: rest.name }, error);
+          throw error;
+      }
+      logger.info('SYSTEM', 'Quiz config updated', { configName: rest.name, id });
   } else {
       const { error } = await supabase.from('quiz_configs').insert(dbPayload);
-      if(error) console.error(error);
+      if(error) {
+          logger.error('SYSTEM', 'Error creating quiz config', { configName: rest.name }, error);
+          throw error;
+      }
+      logger.info('SYSTEM', 'Quiz config created', { configName: rest.name });
   }
 };
 
 export const deleteQuizConfig = async (id: string): Promise<void> => {
     // Soft delete
-    await supabase.from('quiz_configs').update({ is_deleted: true }).eq('id', id);
+    const { error } = await supabase.from('quiz_configs').update({ is_deleted: true }).eq('id', id);
+    if (error) {
+        logger.error('SYSTEM', 'Error deleting quiz config', { configId: id }, error);
+        throw error;
+    }
+    logger.warn('SYSTEM', 'Quiz config soft deleted', { configId: id });
 }
 
 export const toggleQuizConfigVisibility = async (id: string): Promise<void> => {
-    const { data } = await supabase.from('quiz_configs').select('is_published').eq('id', id).single();
+    const { data, error: fetchError } = await supabase.from('quiz_configs').select('is_published').eq('id', id).single();
+    
+    if (fetchError) {
+        console.error('Error fetching quiz config status:', fetchError);
+        throw fetchError;
+    }
+
     if (data) {
-        await supabase.from('quiz_configs').update({ is_published: !data.is_published }).eq('id', id);
+        const newValue = !data.is_published;
+        const { error: updateError } = await supabase.from('quiz_configs').update({ is_published: newValue }).eq('id', id);
+        if (updateError) {
+            logger.error('SYSTEM', 'Error toggling quiz config visibility', { configId: id }, updateError);
+            throw updateError;
+        }
+        logger.info('SYSTEM', 'Quiz config visibility toggled', { configId: id, isPublished: newValue });
     }
 };
 
 export const generateQuiz = async (configId: string): Promise<{ questions: Question[], configName: string, passingScore: number }> => {
-    const { data: config } = await supabase.from('quiz_configs').select('*').eq('id', configId).single();
+    // Ensure we don't generate quiz from deleted config
+    const { data: config, error } = await supabase
+        .from('quiz_configs')
+        .select('*')
+        .eq('id', configId)
+        .neq('is_deleted', true)
+        .single();
     
+    if (error) {
+        console.error("Error fetching quiz config:", error);
+        throw error;
+    }
+
     if (!config) {
-        return { questions: [], configName: 'Unknown', passingScore: 0 };
+        throw new Error("Quiz configuration not found");
     }
 
     const mappedConfig = mapConfigFromDB(config as DBConfig);
