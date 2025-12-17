@@ -44,6 +44,7 @@ export interface Question {
   explanation?: string; // New field for answer explanation
   blankCount?: number; // Runtime field for FILL_IN_THE_BLANK questions to indicate number of inputs
   isDeleted?: boolean; // New field for soft delete status
+  quizPartName?: string; // Runtime field: which part of the quiz config this question belongs to
 }
 
 export interface QuizAttempt {

@@ -101,7 +101,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
             const img = new Image();
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_WIDTH = 800;
+                // Increased resolution limit for better quality
+                const MAX_WIDTH = 1600; 
                 let width = img.width;
                 let height = img.height;
 
@@ -115,7 +116,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
                 const ctx = canvas.getContext('2d');
                 ctx?.drawImage(img, 0, 0, width, height);
                 
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                // Increased quality from 0.7 to 0.9
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
                 setImageUrls(prev => [...prev, dataUrl]);
             };
             img.src = event.target?.result as string;

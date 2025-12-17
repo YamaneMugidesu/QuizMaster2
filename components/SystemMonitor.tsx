@@ -154,62 +154,206 @@ export default function SystemMonitor() {
         });
     };
 
+    // --- Helper Component for Rendering Values ---
+    const DiffValueRenderer = ({ value }: { value: any }) => {
+        if (value === null || value === undefined) {
+            return <span className="text-gray-400 italic">Empty</span>;
+        }
+        if (typeof value === 'boolean') {
+            return (
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${value ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                    {String(value)}
+                </span>
+            );
+        }
+        if (Array.isArray(value)) {
+             if (value.length === 0) return <span className="text-gray-400 text-xs">[ ]</span>;
+             return (
+                 <div className="flex flex-col gap-1">
+                     {value.map((item, idx) => (
+                         <div key={idx} className="text-xs bg-white/50 px-1 rounded border border-gray-200/50 truncate max-w-[200px]" title={String(item)}>
+                             {typeof item === 'object' ? JSON.stringify(item) : String(item)}
+                         </div>
+                     ))}
+                 </div>
+             );
+        }
+        if (typeof value === 'object') {
+            return (
+                <pre className="text-xs font-mono whitespace-pre-wrap break-all max-h-20 overflow-y-auto">
+                    {JSON.stringify(value, null, 1)}
+                </pre>
+            );
+        }
+        return <span className="break-all">{String(value)}</span>;
+    };
+
     const LogDetailModal = ({ log, onClose }: { log: SystemLog; onClose: () => void }) => {
         if (!log) return null;
+
+        const copyToClipboard = (text: string) => {
+             navigator.clipboard.writeText(text).then(() => {
+                 addToast('已复制到剪贴板', 'success');
+             });
+        };
+
         return (
-            <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
-                    <div className="flex justify-between items-center p-6 border-b">
-                        <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                            <span className={`p-1 rounded ${LOG_LEVEL_COLORS[log.level]}`}>
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+                <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden transform transition-all scale-100">
+                    {/* Header */}
+                    <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+                        <div className="flex items-center gap-3">
+                            <span className={`p-2 rounded-lg shadow-sm ${LOG_LEVEL_COLORS[log.level]}`}>
                                 {LOG_LEVEL_ICONS[log.level]}
                             </span>
-                            系统日志详情
-                        </h3>
-                        <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-                            <XIcon size={24} />
+                            <div>
+                                <h3 className="text-lg font-bold text-gray-900">日志详情</h3>
+                                <p className="text-xs text-gray-500 font-mono mt-0.5">{log.id}</p>
+                            </div>
+                        </div>
+                        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition-colors">
+                            <XIcon size={20} />
                         </button>
                     </div>
-                    <div className="p-6 overflow-y-auto">
-                        <div className="grid grid-cols-2 gap-4 mb-6">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-500">时间</label>
-                                <div className="mt-1 text-gray-900">{formatTime(log.createdAt)}</div>
+
+                    {/* Content */}
+                    <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                        {/* Meta Grid */}
+                        <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 flex flex-wrap gap-6 items-start">
+                            <div className="flex flex-col">
+                                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">时间</label>
+                                <div className="text-sm font-medium text-gray-900">{formatTime(log.createdAt)}</div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-500">级别</label>
-                                <div className="mt-1 font-mono">{log.level}</div>
+                            <div className="flex flex-col">
+                                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">级别</label>
+                                <div>
+                                    <span className={`text-sm font-bold px-2 py-0.5 rounded border ${LOG_LEVEL_COLORS[log.level]}`}>
+                                        {log.level}
+                                    </span>
+                                </div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-500">分类</label>
-                                <div className="mt-1 font-mono">{log.category}</div>
+                            <div className="flex flex-col">
+                                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">分类</label>
+                                <div>
+                                    <span className="text-sm font-mono text-gray-700 bg-gray-100 border border-gray-200 px-2 py-0.5 rounded">
+                                        {log.category}
+                                    </span>
+                                </div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-500">触发用户</label>
-                                <div className="mt-1">{log.username || 'System'} <span className="text-gray-400 text-xs">({log.userId || 'N/A'})</span></div>
+                            <div className="flex flex-col flex-1 min-w-[150px]">
+                                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">触发用户</label>
+                                <div className="text-sm text-gray-900 truncate" title={log.userId || 'System'}>
+                                    {log.username || 'System'}
+                                </div>
                             </div>
                         </div>
 
-                        <div className="mb-6">
-                            <label className="block text-sm font-medium text-gray-500 mb-2">消息内容</label>
-                            <div className="bg-gray-50 p-3 rounded border text-gray-800">
+                        {/* Message */}
+                        <div>
+                            <label className="text-sm font-semibold text-gray-700 mb-2 block">消息内容</label>
+                            <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm text-gray-800 text-sm leading-relaxed">
                                 {log.message}
                             </div>
                         </div>
 
+                        {/* Details Section */}
                         {log.details && (
-                            <div>
-                                <label className="block text-sm font-medium text-gray-500 mb-2">JSON 详情数据</label>
-                                <pre className="bg-slate-900 text-slate-100 p-4 rounded-lg overflow-x-auto text-sm font-mono">
-                                    {JSON.stringify(log.details, null, 2)}
-                                </pre>
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <label className="text-sm font-semibold text-gray-700">详情数据</label>
+                                </div>
+                                
+                                {/* Diff View */}
+                                {log.details.diff && Object.keys(log.details.diff).length > 0 ? (
+                                    <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                                        <div className="bg-gray-50/80 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+                                            <span className="font-semibold text-gray-700 text-sm flex items-center gap-2">
+                                                <RefreshCwIcon size={14} className="text-gray-400"/>
+                                                变更对比 (Diff)
+                                            </span>
+                                            <span className="text-xs text-gray-500 bg-white px-2 py-1 rounded border">
+                                                {Object.keys(log.details.diff).length} 个字段变更
+                                            </span>
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                            <table className="min-w-full divide-y divide-gray-200">
+                                                <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                                                    <tr>
+                                                        <th className="px-6 py-3 text-left w-1/5">字段名</th>
+                                                        <th className="px-6 py-3 text-left w-2/5">
+                                                            <span className="flex items-center gap-1 text-red-600/80">
+                                                                <span className="w-2 h-2 rounded-full bg-red-400"></span>
+                                                                变更前
+                                                            </span>
+                                                        </th>
+                                                        <th className="px-6 py-3 text-left w-2/5">
+                                                            <span className="flex items-center gap-1 text-green-600/80">
+                                                                <span className="w-2 h-2 rounded-full bg-green-400"></span>
+                                                                变更后
+                                                            </span>
+                                                        </th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="bg-white divide-y divide-gray-100">
+                                                    {Object.entries(log.details.diff).map(([key, val]: [string, any]) => (
+                                                        <tr key={key} className="hover:bg-gray-50/50 transition-colors">
+                                                            <td className="px-6 py-4 text-sm font-medium text-gray-700 font-mono">
+                                                                {key}
+                                                            </td>
+                                                            <td className="px-6 py-4 text-sm bg-red-50/30 text-gray-600">
+                                                                <DiffValueRenderer value={val.old} />
+                                                            </td>
+                                                            <td className="px-6 py-4 text-sm bg-green-50/30 text-gray-800 font-medium">
+                                                                <DiffValueRenderer value={val.new} />
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                ) : log.details.changes ? (
+                                    // Fallback for older logs or simple changes
+                                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                                        <h4 className="text-sm font-medium text-yellow-800 mb-2">更新快照 (Legacy)</h4>
+                                        <pre className="text-xs text-yellow-700 overflow-auto max-h-40">
+                                            {JSON.stringify(log.details.changes, null, 2)}
+                                        </pre>
+                                    </div>
+                                ) : null}
+
+                                {/* Raw JSON View (Collapsible) */}
+                                <details className="group border border-gray-200 rounded-lg overflow-hidden">
+                                    <summary className="bg-gray-50 px-4 py-3 cursor-pointer flex justify-between items-center select-none hover:bg-gray-100 transition-colors">
+                                        <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                                            <span className="transform group-open:rotate-90 transition-transform text-gray-400">▶</span>
+                                            原始 JSON 数据
+                                        </span>
+                                        <button 
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                copyToClipboard(JSON.stringify(log.details, null, 2));
+                                            }}
+                                            className="text-xs text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
+                                        >
+                                            复制 JSON
+                                        </button>
+                                    </summary>
+                                    <div className="bg-slate-900 p-4 border-t border-gray-200">
+                                        <pre className="text-slate-300 text-xs font-mono overflow-auto max-h-60">
+                                            {JSON.stringify(log.details, null, 2)}
+                                        </pre>
+                                    </div>
+                                </details>
                             </div>
                         )}
                     </div>
-                    <div className="p-4 border-t bg-gray-50 flex justify-end">
+
+                    {/* Footer */}
+                    <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
                         <button 
                             onClick={onClose}
-                            className="px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                            className="px-5 py-2 bg-white border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-gray-900 transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                         >
                             关闭
                         </button>
@@ -316,9 +460,10 @@ export default function SystemMonitor() {
             </div>
 
             {/* Table */}
-            <div className="bg-white rounded-lg shadow overflow-hidden border border-gray-200">
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
+            <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
                         <tr>
                             <th scope="col" className="px-6 py-3 w-12">
                                 <input 
@@ -423,6 +568,7 @@ export default function SystemMonitor() {
                         )}
                     </tbody>
                 </table>
+                </div>
                 
                 {/* Pagination */}
                 <div className="bg-white px-4 py-3 border-t border-gray-200 flex items-center justify-between sm:px-6">

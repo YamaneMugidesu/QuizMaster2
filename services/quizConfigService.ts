@@ -103,19 +103,73 @@ export const saveQuizConfig = async (config: QuizConfig): Promise<void> => {
   };
 
   if (id && id.length > 20) {
-      const { error } = await supabase.from('quiz_configs').update(dbPayload).eq('id', id);
-      if(error) {
-          logger.error('SYSTEM', 'Error updating quiz config', { configName: rest.name }, error);
-          throw error;
+        // 1. Fetch old data
+        let oldConfig: QuizConfig | undefined;
+        try {
+            const { data, error } = await supabase.from('quiz_configs').select('*').eq('id', id).single();
+            if (error) {
+                console.error('Error fetching old config for diff:', error);
+            }
+            if (data) oldConfig = mapConfigFromDB(data as DBConfig);
+        } catch (e) {
+            console.error('Exception fetching old config:', e);
+        }
+
+        const { error } = await supabase.from('quiz_configs').update(dbPayload).eq('id', id);
+        // === 第一道防线：数据库原子性检查 ===
+        // 如果数据库更新失败，这里会直接抛出异常，中断流程。
+        // 因此，如果代码能执行到下方，说明数据已 100% 安全存入数据库。
+        if(error) {
+            logger.error('SYSTEM', 'Error updating quiz config', { configName: rest.name }, error);
+            throw error;
+        }
+
+        // === 第二道防线：日志系统的异常隔离 ===
+        // 数据保存成功后，我们尝试计算变更详情（Diff）。
+        // 使用 try-catch 包裹是为了"保底"：即使日志计算逻辑出错（非核心业务），
+        // 也不应该反过来导致前端显示"保存失败"，因为数据其实已经保存好了。
+        // 2. Diff (Safe Mode)
+        try {
+            const diff: any = {};
+            if(oldConfig) {
+                if(oldConfig.name !== rest.name) diff['name'] = { old: oldConfig.name, new: rest.name };
+                if(oldConfig.passingScore !== rest.passingScore) diff['passingScore'] = { old: oldConfig.passingScore, new: rest.passingScore };
+                if(oldConfig.totalQuestions !== rest.totalQuestions) diff['totalQuestions'] = { old: oldConfig.totalQuestions, new: rest.totalQuestions };
+                if(oldConfig.description !== rest.description) diff['description'] = { old: oldConfig.description, new: rest.description };
+                if(oldConfig.quizMode !== rest.quizMode) diff['quizMode'] = { old: oldConfig.quizMode, new: rest.quizMode };
+                if(oldConfig.isPublished !== rest.isPublished) diff['isPublished'] = { old: oldConfig.isPublished, new: rest.isPublished };
+                
+                const oldPartsStr = JSON.stringify(oldConfig.parts);
+                const newPartsStr = JSON.stringify(rest.parts);
+                if(oldPartsStr !== newPartsStr) {
+                    diff['parts'] = { 
+                        old: `${oldConfig.parts.length} parts`, 
+                        new: `${rest.parts.length} parts (Updated)` 
+                    };
+                }
+            } else {
+                diff['_warning'] = { old: 'Unknown', new: 'Old config not found - diff unavailable' };
+            }
+
+            logger.info('SYSTEM', 'Quiz config updated', { 
+                configName: rest.name, 
+                id,
+                diff: Object.keys(diff).length > 0 ? diff : undefined 
+            });
+        } catch (logError) {
+          console.error('Failed to calculate diff or log for quiz config', logError);
+          logger.info('SYSTEM', 'Quiz config updated (Log Error)', { configName: rest.name, id });
       }
-      logger.info('SYSTEM', 'Quiz config updated', { configName: rest.name, id });
   } else {
       const { error } = await supabase.from('quiz_configs').insert(dbPayload);
       if(error) {
           logger.error('SYSTEM', 'Error creating quiz config', { configName: rest.name }, error);
           throw error;
       }
-      logger.info('SYSTEM', 'Quiz config created', { configName: rest.name });
+      logger.info('SYSTEM', 'Quiz config created', { 
+          configName: rest.name,
+          fullData: rest // Aligned with SystemMonitor UI
+      });
   }
 };
 
@@ -248,7 +302,8 @@ export const generateQuiz = async (configId: string): Promise<{ questions: Quest
                 ...q,
                 score: part.score, // Override question score with config part score
                 correctAnswer: '', // SECURITY: Clear correct answer for client
-                blankCount: blankCount
+                blankCount: blankCount,
+                quizPartName: part.name // Inject part name for UI display
             });
         }
     }

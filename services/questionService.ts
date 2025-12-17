@@ -185,17 +185,47 @@ export const saveQuestion = async (question: Question): Promise<Question> => {
     .select()
     .single();
 
+  // === 第一道防线：数据库写入确认 ===
+  // Supabase 的 insert 操作是原子性的。如果有 error，说明数据库拒绝了写入。
+  // 此时抛出异常，前端会收到错误提示，流程终止。
   if (error) {
     logger.error('DB', 'Error saving question', { questionText: rest.text }, error);
     throw error;
   }
   
   const savedQuestion = mapQuestionFromDB(data as DBQuestion);
-  logger.info('SYSTEM', 'Question created', { questionId: savedQuestion.id, subject: savedQuestion.subject });
+  
+  // === 日志数据增强 ===
+  // 执行到这里，说明数据库已成功保存。
+  // 为了防止数据库返回的数据不完整（如因网络波动导致 select 缺字段）影响审计日志，
+  // 我们将"前端提交的完整数据"与"数据库返回的数据"合并，确保日志永远是完整的。
+  const logData = { ...rest, ...savedQuestion };
+  
+  logger.info('SYSTEM', 'Question created', { 
+    questionId: savedQuestion.id, 
+    subject: logData.subject,
+    type: logData.type,
+    text: (logData.text || '').substring(0, 100) + ((logData.text || '').length > 100 ? '...' : ''),
+    fullData: logData 
+  });
   return savedQuestion;
 };
 
 export const updateQuestion = async (updatedQuestion: Question): Promise<void> => {
+  // 1. Fetch old data for diff logging
+  let oldQuestion: Question | undefined;
+  try {
+      const { data, error } = await supabase.from('questions').select('*').eq('id', updatedQuestion.id).single();
+      if (error) {
+          console.error('Error fetching old question for diff:', error);
+      }
+      if (data) {
+          oldQuestion = mapQuestionFromDB(data as DBQuestion);
+      }
+  } catch (e) {
+      console.error('Exception fetching old question:', e);
+  }
+
   const dbPayload = {
     type: updatedQuestion.type,
     text: updatedQuestion.text,
@@ -223,7 +253,37 @@ export const updateQuestion = async (updatedQuestion: Question): Promise<void> =
     throw error;
   }
   
-  logger.info('SYSTEM', 'Question updated', { questionId: updatedQuestion.id });
+  // 2. Calculate Diff (Safe Mode)
+  try {
+      const diff: Record<string, { old: any, new: any }> = {};
+      if (oldQuestion) {
+          if (oldQuestion.text !== updatedQuestion.text) diff['text'] = { old: oldQuestion.text, new: updatedQuestion.text };
+          if (oldQuestion.score !== updatedQuestion.score) diff['score'] = { old: oldQuestion.score, new: updatedQuestion.score };
+          if (oldQuestion.type !== updatedQuestion.type) diff['type'] = { old: oldQuestion.type, new: updatedQuestion.type };
+          if (oldQuestion.difficulty !== updatedQuestion.difficulty) diff['difficulty'] = { old: oldQuestion.difficulty, new: updatedQuestion.difficulty };
+          if (oldQuestion.subject !== updatedQuestion.subject) diff['subject'] = { old: oldQuestion.subject, new: updatedQuestion.subject };
+          if (oldQuestion.gradeLevel !== updatedQuestion.gradeLevel) diff['gradeLevel'] = { old: oldQuestion.gradeLevel, new: updatedQuestion.gradeLevel };
+          if (oldQuestion.category !== updatedQuestion.category) diff['category'] = { old: oldQuestion.category, new: updatedQuestion.category };
+          if (oldQuestion.correctAnswer !== updatedQuestion.correctAnswer) diff['correctAnswer'] = { old: oldQuestion.correctAnswer, new: updatedQuestion.correctAnswer };
+          if (oldQuestion.explanation !== updatedQuestion.explanation) diff['explanation'] = { old: oldQuestion.explanation, new: updatedQuestion.explanation };
+          if (oldQuestion.needsGrading !== updatedQuestion.needsGrading) diff['needsGrading'] = { old: oldQuestion.needsGrading, new: updatedQuestion.needsGrading };
+          if (oldQuestion.isDisabled !== updatedQuestion.isDisabled) diff['isDisabled'] = { old: oldQuestion.isDisabled, new: updatedQuestion.isDisabled };
+          
+          if (JSON.stringify(oldQuestion.options) !== JSON.stringify(updatedQuestion.options)) diff['options'] = { old: oldQuestion.options, new: updatedQuestion.options };
+          if (JSON.stringify(oldQuestion.imageUrls) !== JSON.stringify(updatedQuestion.imageUrls)) diff['imageUrls'] = { old: oldQuestion.imageUrls, new: updatedQuestion.imageUrls };
+      } else {
+          diff['_warning'] = { old: 'Unknown', new: 'Old question not found - diff unavailable' };
+      }
+
+      logger.info('SYSTEM', 'Question updated', { 
+        questionId: updatedQuestion.id,
+        diff: Object.keys(diff).length > 0 ? diff : undefined
+      });
+  } catch (logError) {
+      // Fallback logging if diff calculation fails
+      console.error('Failed to calculate diff or log', logError);
+      logger.info('SYSTEM', 'Question updated (Log Error)', { questionId: updatedQuestion.id });
+  }
 };
 
 export const toggleQuestionVisibility = async (id: string): Promise<void> => {
