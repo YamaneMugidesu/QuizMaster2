@@ -46,6 +46,22 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
     const [processingId, setProcessingId] = useState<string | null>(null);
     const { addToast } = useToast();
 
+    const [isRefreshing, setIsRefreshing] = useState(false);
+
+    const handleRefresh = async () => {
+        if (isRefreshing) return;
+        setIsRefreshing(true);
+        try {
+            await mutate();
+            addToast('刷新成功', 'success');
+        } catch (error) {
+            console.error('Refresh failed:', error);
+            addToast('刷新失败', 'error');
+        } finally {
+            setIsRefreshing(false);
+        }
+    };
+
     useEffect(() => {
         if (configs.length > 0) {
             if (!selectedConfigId || !configs.find(c => c.id === selectedConfigId)) {
@@ -397,8 +413,8 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
                                     )}
                                 </Button>
                             )}
-                            <Button variant="ghost" className="p-1 text-primary-600" onClick={() => mutate()} title="刷新列表">
-                                <svg className={`w-5 h-5 ${isConfigsLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                            <Button variant="ghost" className="p-1 text-primary-600" onClick={handleRefresh} disabled={isRefreshing} title="刷新列表">
+                                <svg className={`w-5 h-5 ${isConfigsLoading || isRefreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                             </Button>
                         </div>
                     </div>

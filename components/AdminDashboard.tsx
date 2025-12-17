@@ -36,6 +36,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   const [filterDifficulty, setFilterDifficulty] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [showRecycleBin, setShowRecycleBin] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Debounce Search
   useEffect(() => {
@@ -364,12 +365,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   };
 
   const refreshData = async () => {
-      if (activeTab === 'list') {
-          mutateQuestions();
-      } else if (activeTab === 'records') {
-          mutateResults();
-      } else if (activeTab === 'users') {
-          mutateUsers();
+      if (isRefreshing) return;
+      setIsRefreshing(true);
+      try {
+          if (activeTab === 'list') {
+              await mutateQuestions();
+          } else if (activeTab === 'records') {
+              await mutateResults();
+          } else if (activeTab === 'users') {
+              await mutateUsers();
+          }
+          addToast('刷新成功', 'success');
+      } catch (error) {
+          console.error('Refresh failed:', error);
+          addToast('刷新失败', 'error');
+      } finally {
+          setIsRefreshing(false);
       }
       // Monitor refreshes itself
   };
@@ -392,10 +403,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
             <Button
               variant="ghost"
               onClick={refreshData}
+              disabled={isRefreshing}
               className="text-sm whitespace-nowrap px-2"
               title="刷新数据"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </Button>
