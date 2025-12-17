@@ -72,7 +72,15 @@ export const saveQuizResult = async (result: QuizResult): Promise<void> => {
     throw error;
   }
   
-  logger.info('USER_ACTION', 'Quiz result saved', { userId: result.userId, score: result.score, passed: result.isPassed });
+  logger.info('USER_ACTION', 'Quiz result saved', { 
+    userId: result.userId, 
+    username: result.username,
+    configName: result.configName,
+    score: result.score, 
+    passed: result.isPassed,
+    duration: result.duration,
+    totalQuestions: result.totalQuestions
+  });
 };
 
 export const deleteQuizResult = async (id: string): Promise<void> => {
