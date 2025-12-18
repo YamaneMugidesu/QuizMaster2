@@ -174,9 +174,8 @@ const MainContent: React.FC = () => {
             handleLogout();
         } else {
             addToast('保存成绩失败，请重试', 'error');
-            // Still show result? Maybe not if it failed to save.
-            // But for user experience, maybe show it but warn?
-            // Let's just return to dashboard or show error.
+            // Re-throw error so QuizTaker knows submission failed
+            throw error;
         }
     }
   };

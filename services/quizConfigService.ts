@@ -92,6 +92,7 @@ export const getQuizConfig = async (id: string, includeDeleted: boolean = false)
 export const saveQuizConfig = async (config: QuizConfig): Promise<void> => {
   const { id, ...rest } = config;
   const dbPayload = {
+    id: id, // Explicitly include ID to ensure frontend/backend consistency
     name: rest.name,
     description: rest.description,
     passing_score: rest.passingScore,
@@ -102,7 +103,8 @@ export const saveQuizConfig = async (config: QuizConfig): Promise<void> => {
     is_published: rest.isPublished
   };
 
-  if (id && id.length > 20) {
+  // Check if updating existing config (must have valid UUID)
+  if (id && id.length > 30) {
         // 1. Fetch old data
         let oldConfig: QuizConfig | undefined;
         try {

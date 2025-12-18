@@ -91,7 +91,8 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
         setIsCreating(true);
         try {
             const newConfig: QuizConfig = {
-                id: Math.random().toString(36).substr(2, 9),
+                // Fix: Use UUID for ID to match database schema (uuid type)
+                id: crypto.randomUUID(),
                 name: '新试卷配置',
                 description: '这是一份新的试卷配置',
                 totalQuestions: 0,

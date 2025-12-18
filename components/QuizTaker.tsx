@@ -33,8 +33,20 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showMobileNav, setShowMobileNav] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const startTime = React.useRef<number>(Date.now());
   const { addToast } = useToast();
+
+  const currentQ = questions[currentIdx];
+
+  // Optimize performance for section stats calculation
+  // Move useMemo to top level to avoid "Rendered more hooks" error
+  const currentPartStats = React.useMemo(() => {
+      if (!currentQ) return { name: '默认部分', count: 0 };
+      const partName = currentQ.quizPartName || '默认部分';
+      const count = questions.filter(q => (q.quizPartName || '默认部分') === partName).length;
+      return { name: partName, count };
+  }, [currentQ?.quizPartName, questions, currentQ]);
 
   useEffect(() => {
     const load = async () => {
@@ -130,6 +142,26 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
     }));
   };
 
+  const hasAnswer = (q: Question) => {
+      const ans = answers[q.id];
+      if (!ans) return false;
+      
+      try {
+          if (q.type === QuestionType.MULTIPLE_SELECT) {
+              return ans !== '[]';
+          }
+          if (q.type === QuestionType.FILL_IN_THE_BLANK) {
+              const arr = JSON.parse(ans);
+              return Array.isArray(arr) && arr.some(v => v && v.trim() !== '');
+          }
+      } catch (e) {
+          // If JSON parse fails but ans has value, consider it valid for safety
+          // or invalid depending on strictness. Here we assume non-empty string is valid.
+      }
+      
+      return ans.trim() !== '';
+  };
+
   const handleMultiSelectChange = (value: string) => {
       const qId = questions[currentIdx].id;
       const currentValStr = answers[qId];
@@ -178,7 +210,14 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
     if (currentIdx < questions.length - 1) {
       setCurrentIdx(currentIdx + 1);
     } else {
-      finishQuiz();
+      const unansweredCount = questions.filter(q => !hasAnswer(q)).length;
+      if (unansweredCount > 0) {
+          if (window.confirm(`您还有 ${unansweredCount} 道题目未作答，确定要提交试卷吗？`)) {
+              finishQuiz();
+          }
+      } else {
+          finishQuiz();
+      }
     }
   };
 
@@ -190,6 +229,7 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
 
   const finishQuiz = async () => {
     setIsSubmitting(true);
+    setSubmitError(null);
     
     // Prepare payload for grading service
     const attemptsPayload = questions.map(q => ({
@@ -204,7 +244,7 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
         gradedResult = await gradeQuiz(attemptsPayload);
     } catch (error) {
         console.error("Grading failed", error);
-        addToast('提交试卷失败，请重试', 'error');
+        setSubmitError('评分服务连接失败，请检查网络后重试。');
         setIsSubmitting(false);
         return;
     }
@@ -252,8 +292,7 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
         clearAutoSave();
     } catch (error) {
         console.error("Failed to complete quiz submission", error);
-        // Toast is likely handled by onComplete, but we can add one here if needed
-        // or just ensure we don't clearAutoSave
+        setSubmitError('成绩保存失败，请重试。');
     } finally {
         setIsSubmitting(false);
     }
@@ -283,8 +322,6 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
         </div>
      )
   }
-
-  const currentQ = questions[currentIdx];
   
   // Robustness Check: Ensure currentQ exists
   if (!currentQ) {
@@ -299,13 +336,6 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
           </div>
       );
   }
-
-  // Optimize performance for section stats calculation
-  const currentPartStats = React.useMemo(() => {
-      const partName = currentQ.quizPartName || '默认部分';
-      const count = questions.filter(q => (q.quizPartName || '默认部分') === partName).length;
-      return { name: partName, count };
-  }, [currentQ.quizPartName, questions]);
 
   const progress = ((currentIdx + 1) / questions.length) * 100;
   const currentAnswer = answers[currentQ.id] || '';
@@ -345,26 +375,6 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
   }
 
   const images = currentQ.imageUrls || ((currentQ as any).imageUrl ? [(currentQ as any).imageUrl] : []);
-
-  const hasAnswer = (q: Question) => {
-      const ans = answers[q.id];
-      if (!ans) return false;
-      
-      try {
-          if (q.type === QuestionType.MULTIPLE_SELECT) {
-              return ans !== '[]';
-          }
-          if (q.type === QuestionType.FILL_IN_THE_BLANK) {
-              const arr = JSON.parse(ans);
-              return Array.isArray(arr) && arr.some(v => v && v.trim() !== '');
-          }
-      } catch (e) {
-          // If JSON parse fails but ans has value, consider it valid for safety
-          // or invalid depending on strictness. Here we assume non-empty string is valid.
-      }
-      
-      return ans.trim() !== '';
-  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -648,6 +658,28 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
               </div>
           </div>
       </div>
+
+      {submitError && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 transform transition-all scale-100">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 text-center mb-2">提交失败</h3>
+            <p className="text-gray-500 text-center mb-6">{submitError}</p>
+            <div className="flex gap-3">
+              <Button variant="ghost" onClick={() => setSubmitError(null)} className="flex-1 justify-center">
+                取消
+              </Button>
+              <Button onClick={() => finishQuiz()} className="flex-1 justify-center bg-red-600 hover:bg-red-700 text-white" isLoading={isSubmitting}>
+                重试提交
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
