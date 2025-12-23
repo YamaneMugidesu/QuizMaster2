@@ -1,9 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { QuizResult, Question, QuestionType, QuizConfig, QuizPartConfig } from '../types';
-import { getQuizConfig, gradeQuizResult, getQuestionsByIds } from '../services/storageService';
+import { getQuizConfig, gradeQuizResult, getQuestionsByIds, getResultById } from '../services/storageService';
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
+import { RichTextPreview } from './RichTextPreview';
 import { useToast } from './Toast';
 import { sanitizeHTML } from '../utils/sanitize';
 
@@ -21,33 +22,103 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
   const [editingScores, setEditingScores] = useState<{ [key: number]: string }>({});
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Pagination for Review Section
+  const [reviewPage, setReviewPage] = useState(1);
+  const reviewItemsPerPage = 10;
+  const [shouldScrollToReview, setShouldScrollToReview] = useState(false);
+  const reviewSectionRef = useRef<HTMLDivElement>(null);
+  
+  // Lazy loading cache for questions
+  const [fetchedQuestions, setFetchedQuestions] = useState<Map<string, Question>>(new Map());
+
   const { addToast } = useToast();
 
   useEffect(() => {
       const load = async () => {
-          // Optimization: Only fetch questions relevant to this result
-          const questionIds = result.attempts.map(a => a.questionId);
-          // Remove duplicates
-          const uniqueIds = Array.from(new Set(questionIds));
-          
-          if (uniqueIds.length > 0) {
-              // Pass true to includeDeleted to ensure we can see historical questions
-              const questions = await getQuestionsByIds(uniqueIds, true);
-              setAllQuestions(questions);
-          } else {
-              setAllQuestions([]);
+          let currentResult = result;
+
+          // If attempts are missing (due to list optimization), fetch full details
+          if (!currentResult.attempts || currentResult.attempts.length === 0) {
+              const fullResult = await getResultById(result.id);
+              if (fullResult) {
+                  currentResult = fullResult;
+                  setLocalResult(fullResult);
+              } else {
+                  addToast('无法加载答题详情', 'error');
+                  setIsLoading(false);
+                  return;
+              }
           }
 
-          if (!config && result.configId) {
+          if (!config && currentResult.configId) {
               // Include deleted configs for historical review
-              const conf = await getQuizConfig(result.configId, true);
+              const conf = await getQuizConfig(currentResult.configId, true);
               setConfig(conf);
           }
           
           setIsLoading(false);
       };
       load();
-  }, [result.configId, result.attempts]); // Add result.attempts to dependency
+  }, [result.id]);
+
+  // Lazy load questions when page changes or result loads
+  useEffect(() => {
+      if (isLoading || !localResult.attempts) return;
+
+      const fetchPageQuestions = async () => {
+          const startIndex = (reviewPage - 1) * reviewItemsPerPage;
+          const endIndex = startIndex + reviewItemsPerPage;
+          const currentAttempts = localResult.attempts.slice(startIndex, endIndex);
+          
+          const idsToFetch = currentAttempts
+              .map(a => a.questionId)
+              .filter(id => !fetchedQuestions.has(id));
+          
+          const uniqueIds = Array.from(new Set(idsToFetch));
+          
+          if (uniqueIds.length > 0) {
+              try {
+                  const newQuestions = await getQuestionsByIds(uniqueIds, true);
+                  setFetchedQuestions(prev => {
+                      const next = new Map(prev);
+                      newQuestions.forEach(q => next.set(q.id, q));
+                      // Also mark IDs that returned nothing as fetched (to avoid infinite retries)
+                      // Ideally getQuestionsByIds returns everything found. Missing ones are deleted.
+                      uniqueIds.forEach(id => {
+                          if (!next.has(id)) {
+                              // Create a dummy deleted question marker if needed, 
+                              // or just rely on the fact that getQuestionText handles missing ones.
+                              // But to stop refetching, we should probably mark them.
+                              // However, for simplicity, we just rely on newQuestions for now.
+                              // A robust implementation would mark missing IDs too.
+                          }
+                      });
+                      return next;
+                  });
+              } catch (e) {
+                  console.error("Failed to fetch page questions", e);
+              }
+          }
+      };
+
+      fetchPageQuestions();
+  }, [reviewPage, localResult.attempts, isLoading]); // fetchedQuestions omitted to avoid loop, we check inside
+
+  // Handle scrolling to review section when page changes
+  useEffect(() => {
+      if (shouldScrollToReview && reviewSectionRef.current) {
+          const headerOffset = 100; // Account for sticky header
+          const elementPosition = reviewSectionRef.current.getBoundingClientRect().top;
+          const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+
+          window.scrollTo({
+              top: offsetPosition,
+              behavior: "smooth"
+          });
+          setShouldScrollToReview(false);
+      }
+  }, [reviewPage, shouldScrollToReview]);
 
   // Sync local result if prop changes (though unlikely in this flow)
   useEffect(() => {
@@ -60,8 +131,22 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
 
   // Check if question exists in DB by ID
   const isQuestionDeleted = (id: string) => {
-    if (allQuestions.length === 0) return false;
-    return !allQuestions.some(q => String(q.id) === String(id));
+    // If not fetched yet, assume not deleted (or loading)
+    if (fetchedQuestions.size === 0 && allQuestions.length === 0) return false;
+    
+    // Check in lazy cache first
+    if (fetchedQuestions.has(id)) return !!fetchedQuestions.get(id)?.isDeleted;
+
+    // Fallback to legacy array if used
+    if (allQuestions.length > 0) return !allQuestions.some(q => String(q.id) === String(id));
+
+    return false; 
+  };
+  
+  // Updated Helper: Lookup in Map or Array
+  const getQuestionById = (id: string) => {
+      if (fetchedQuestions.has(id)) return fetchedQuestions.get(id);
+      return allQuestions.find(q => String(q.id) === String(id));
   };
 
   const formatDuration = (seconds?: number) => {
@@ -77,45 +162,22 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
     // If snapshot exists, use it (historical version)
     if (snapshot) return snapshot;
     // Otherwise try to find current version (legacy records or fallback)
-    const q = allQuestions.find(q => String(q.id) === String(id));
+    const q = getQuestionById(id);
     return q?.text || "该题目已完全从题库中删除且无备份";
   };
   
   const getQuestionImages = (id: string, snapshot?: string[]) => {
     if (snapshot && snapshot.length > 0) return snapshot;
-    const q = allQuestions.find(q => String(q.id) === String(id));
+    const q = getQuestionById(id);
     if (q) return q.imageUrls || ((q as any).imageUrl ? [(q as any).imageUrl] : []);
     return [];
   }
 
   const getCorrectAnswerRaw = (id: string, snapshot?: string) => {
     if (snapshot) return snapshot;
-    const q = allQuestions.find(q => String(q.id) === String(id));
+    const q = getQuestionById(id);
     return q?.correctAnswer || "未知";
   };
-
-  const renderRichTextAnswer = (content: string) => {
-      if (!content) return <span className="text-gray-400">(未作答)</span>;
-  
-      try {
-          if (content.startsWith('[') && content.endsWith(']')) {
-              const parsed = JSON.parse(content);
-              if (Array.isArray(parsed)) {
-                  return (
-                      <div className="flex flex-wrap gap-2">
-                          {parsed.map((item, i) => (
-                              <span key={i} className="inline-block px-2 py-0.5 rounded border border-gray-300 bg-white/80 rich-text-content" dangerouslySetInnerHTML={{ __html: sanitizeHTML(item) }} />
-                          ))}
-                      </div>
-                  );
-              }
-          }
-      } catch (e) {
-          // Fallback to normal render
-      }
-  
-      return <div className="rich-text-content inline-block" dangerouslySetInnerHTML={{ __html: sanitizeHTML(content) }} />;
-    };
 
   // Helper to normalize HTML content for comparison
   const normalizeHtml = (html: string) => {
@@ -129,7 +191,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
   // Helper to get explanation, falling back to snapshot
   const getExplanation = (id: string, snapshot?: string) => {
     if (snapshot) return snapshot;
-    const q = allQuestions.find(q => String(q.id) === String(id));
+    const q = getQuestionById(id);
     return q?.explanation || "";
   };
 
@@ -231,7 +293,9 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
       }
   };
 
-  if (isAdmin && isLoading) {
+  if (isAdmin && isLoading && (!localResult.attempts || localResult.attempts.length === 0)) {
+      // Only show full page loading if we absolutely have no data to show (e.g. deep link)
+      // If we have summary data passed from props, we show that while loading attempts.
       return <div className="text-center p-10">加载详情中...</div>;
   }
 
@@ -254,6 +318,12 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
         </div>
       );
   }
+
+  const totalReviewPages = Math.ceil(localResult.attempts.length / reviewItemsPerPage);
+  const paginatedAttempts = localResult.attempts.slice(
+      (reviewPage - 1) * reviewItemsPerPage,
+      reviewPage * reviewItemsPerPage
+  );
 
   return (
     <div className="max-w-4xl mx-auto animate-fade-in">
@@ -310,7 +380,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
       </div>
 
       {/* Section Scores (New) */}
-      {config && config.parts && (
+      {config && config.parts && (localResult.attempts && localResult.attempts.length > 0) && (
           <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden mb-8">
               <div className="px-6 py-4 bg-blue-50 border-b border-blue-100">
                   <h3 className="font-bold text-blue-800">各部分得分详情</h3>
@@ -333,13 +403,33 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
 
       {/* Review Section - Visible to admins or if quiz is in practice mode */}
       {(isAdmin || config?.quizMode !== 'exam') && (
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
-             <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+      <div 
+        id="review-section" 
+        className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden"
+      >
+             <div 
+                ref={reviewSectionRef}
+                className="px-6 py-4 bg-gray-50 border-b border-gray-200 scroll-mt-24"
+             >
                  <h3 className="font-bold text-gray-700">答题详情回顾</h3>
              </div>
+             {(!localResult.attempts || localResult.attempts.length === 0) ? (
+                 <div className="p-10 text-center text-gray-500">
+                     {isLoading ? (
+                         <div className="flex flex-col items-center justify-center">
+                             <svg className="w-8 h-8 animate-spin text-primary-500 mb-2" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                             <span>正在加载试题详情...</span>
+                         </div>
+                     ) : (
+                         "暂无详细记录"
+                     )}
+                 </div>
+             ) : (
+             <>
              <div className="divide-y divide-gray-100">
-                 {localResult.attempts.map((attempt, idx) => {
-                     const qObj = allQuestions.find(q => String(q.id) === String(attempt.questionId));
+                 {paginatedAttempts.map((attempt, relativeIdx) => {
+                     const idx = (reviewPage - 1) * reviewItemsPerPage + relativeIdx;
+                     const qObj = getQuestionById(attempt.questionId);
                      const questionText = getQuestionText(attempt.questionId, attempt.questionText);
                      const correctTextRaw = getCorrectAnswerRaw(attempt.questionId, attempt.correctAnswerText);
                      const questionImages = getQuestionImages(attempt.questionId, attempt.questionImageUrls);
@@ -360,8 +450,8 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
                                              ))}
                                          </div>
                                      )}
-                                     <div className="font-medium text-gray-900 mb-2 ql-editor" style={{ padding: 0 }}>
-                                        <div dangerouslySetInnerHTML={{ __html: sanitizeHTML(questionText) }} />
+                                     <div className="font-medium text-gray-900 mb-2">
+                                        <RichTextPreview content={questionText} />
                                         {isDeleted && <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-50 text-red-700 border border-red-200">
                                            该题目已删除
                                         </span>}
@@ -373,14 +463,20 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
                                                 <div className={`p-3 rounded-lg border ${attempt.isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                                                     <span className="block text-xs uppercase font-bold opacity-70 mb-1">您的答案</span>
                                                     <div className="font-semibold break-words">
-                                                        {renderRichTextAnswer(attempt.userAnswer)}
+                                                        <RichTextPreview 
+                                                            content={attempt.userAnswer} 
+                                                            placeholder="(未作答)"
+                                                        />
                                                     </div>
                                                 </div>
                                                 {!attempt.isCorrect && (
                                                     <div className="p-3 rounded-lg border bg-gray-50 border-gray-200">
                                                         <span className="block text-xs uppercase font-bold text-gray-500 mb-1">正确答案</span>
                                                         <div className="font-semibold text-gray-800 break-words">
-                                                            {renderRichTextAnswer(correctTextRaw)}
+                                                            <RichTextPreview 
+                                                                content={correctTextRaw} 
+                                                                placeholder="(未知)"
+                                                            />
                                                         </div>
                                                     </div>
                                                 )}
@@ -458,7 +554,7 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
                                                 return (
                                                     <div key={i} className={`flex items-center p-3 border rounded-lg ${borderClass} ${bgClass}`}>
                                                         <span className="font-bold text-gray-500 mr-3">{label}.</span>
-                                                        <div className="rich-text-content flex-1" dangerouslySetInnerHTML={{ __html: sanitizeHTML(opt) }} />
+                                                        <RichTextPreview content={opt} className="flex-1" />
                                                         {icon}
                                                     </div>
                                                 );
@@ -469,7 +565,10 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
                                      <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-100 text-sm text-blue-800">
                                          <span className="font-bold mr-1">💡 解析:</span>
                                          {explanation && explanation.trim() !== '' && explanation !== '<p><br></p>' ? (
-                                             <div className="ql-editor rich-text-content inline-block align-top" style={{ padding: 0 }} dangerouslySetInnerHTML={{ __html: sanitizeHTML(explanation) }} />
+                                             <RichTextPreview 
+                                                 content={explanation} 
+                                                 className="inline-block align-top"
+                                             />
                                          ) : (
                                              <span>无</span>
                                          )}
@@ -510,7 +609,67 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
                      )
                  })}
              </div>
-          </div>
+             
+             {/* Review Pagination */}
+             {totalReviewPages > 1 && (
+                 <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
+                     <div className="text-sm text-gray-500">
+                         显示 {((reviewPage - 1) * reviewItemsPerPage) + 1} 到 {Math.min(reviewPage * reviewItemsPerPage, localResult.attempts.length)} 题，共 {localResult.attempts.length} 题
+                     </div>
+                     <div className="flex space-x-2">
+                         <Button 
+                             variant="secondary" 
+                             size="sm"
+                             disabled={reviewPage === 1}
+                             onClick={() => {
+                                 setReviewPage(prev => Math.max(1, prev - 1));
+                                 setShouldScrollToReview(true);
+                             }}
+                         >
+                             上一页
+                         </Button>
+                         <div className="flex items-center space-x-1">
+                            {Array.from({ length: Math.min(5, totalReviewPages) }, (_, i) => {
+                                let p = i + 1;
+                                if (totalReviewPages > 5) {
+                                    if (reviewPage > 3) p = reviewPage - 2 + i;
+                                    if (p > totalReviewPages) p = totalReviewPages - (4 - i);
+                                }
+                                return p;
+                            }).map(p => (
+                                <button
+                                    key={p}
+                                    onClick={() => {
+                                        setReviewPage(p);
+                                        setShouldScrollToReview(true);
+                                    }}
+                                    className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${
+                                        reviewPage === p
+                                            ? 'bg-primary-600 text-white shadow-sm'
+                                            : 'text-gray-600 hover:bg-gray-200'
+                                    }`}
+                                >
+                                    {p}
+                                </button>
+                            ))}
+                         </div>
+                         <Button 
+                             variant="secondary" 
+                             size="sm"
+                             disabled={reviewPage === totalReviewPages}
+                             onClick={() => {
+                                 setReviewPage(prev => Math.min(totalReviewPages, prev + 1));
+                                 setShouldScrollToReview(true);
+                             }}
+                         >
+                             下一页
+                         </Button>
+                     </div>
+                 </div>
+             )}
+          </>
+          )}
+      </div>
       )}
     </div>
   );

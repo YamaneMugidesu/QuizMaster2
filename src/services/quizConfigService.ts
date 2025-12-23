@@ -248,12 +248,21 @@ export const generateQuiz = async (configId: string): Promise<{ questions: Quest
     const orderedQuestionIds: string[] = [];
     const questionPartMap = new Map<string, any>(); // Map ID to Part Config
 
+    // Helper: Fisher-Yates Shuffle
+    const shuffleArray = (array: string[]) => {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+    };
+
     for (const { part, candidateIds } of results) {
         // Filter used
         const availableIds = candidateIds.filter((id: string) => !usedQuestionIds.has(id));
         
-        // Shuffle
-        const shuffled = availableIds.sort(() => 0.5 - Math.random());
+        // Shuffle using Fisher-Yates
+        const shuffled = shuffleArray([...availableIds]);
         
         // Slice
         const selected = shuffled.slice(0, part.count);

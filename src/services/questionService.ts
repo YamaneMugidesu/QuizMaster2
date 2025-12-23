@@ -50,9 +50,11 @@ export const getQuestions = async (
     filters: QuestionFilters = {}
 ): Promise<{ data: Question[]; total: number }> => {
   // Construct Query
+  // Optimization: Only select fields needed for the list view
+  // We exclude heavy fields like image_urls (Base64), options, explanation
   let query = supabase
     .from('questions')
-    .select('*', { count: 'exact' });
+    .select('id, type, text, correct_answer, subject, grade_level, difficulty, category, created_at, is_disabled, is_deleted, score', { count: 'exact' });
 
   // Handle isDeleted filter (default to false if not specified)
   if (filters.isDeleted === true) {
@@ -100,6 +102,21 @@ export const getQuestions = async (
   return { data: mapped, total: count || 0 };
 };
 
+export const getQuestionById = async (id: string): Promise<Question | null> => {
+    const { data, error } = await supabase
+        .from('questions')
+        .select('*')
+        .eq('id', id)
+        .single();
+    
+    if (error) {
+        logger.error('DB', 'Error fetching question by ID', { id }, error);
+        return null;
+    }
+    
+    return mapQuestionFromDB(data as DBQuestion);
+};
+
 export const getQuestionsByIds = async (ids: string[], includeDeleted: boolean = false): Promise<Question[]> => {
     if (ids.length === 0) return [];
     // Chunking to avoid URL length limits if too many IDs (though unlikely for a quiz)
@@ -111,7 +128,7 @@ export const getQuestionsByIds = async (ids: string[], includeDeleted: boolean =
 
     let allQuestions: DBQuestion[] = [];
 
-    for (const chunk of chunks) {
+    const promises = chunks.map(async (chunk) => {
         let query = supabase.from('questions').select('*').in('id', chunk);
         if (!includeDeleted) {
             query = query.neq('is_deleted', true);
@@ -122,10 +139,15 @@ export const getQuestionsByIds = async (ids: string[], includeDeleted: boolean =
             logger.error('DB', 'Error fetching questions by IDs', { ids: chunk }, error);
             throw error;
         }
+        return data as any[];
+    });
+
+    const results = await Promise.all(promises);
+    results.forEach(data => {
         if (data) {
-            allQuestions = [...allQuestions, ...data as any[]];
+            allQuestions = [...allQuestions, ...data];
         }
-    }
+    });
     
     // Sort to match order of IDs (optional but nice)
     // const idMap = new Map(allQuestions.map(q => [q.id, q]));

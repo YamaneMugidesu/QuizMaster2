@@ -8,8 +8,6 @@ import { useToast } from './Toast';
 // Lazy load RichTextEditor to prevent initial bundle crash if Quill fails
 const RichTextEditor = React.lazy(() => import('./RichTextEditor').then(module => ({ default: module.RichTextEditor })));
 
-// import { uploadImage } from '../services/fileService';
-
 interface QuestionFormProps {
   initialData?: Question;
   onSubmit: (data: QuestionFormData) => void;

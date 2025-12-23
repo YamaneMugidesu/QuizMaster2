@@ -2,12 +2,13 @@ import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { User, UserRole, QuizResult } from './types';
 import { Button } from './components/Button';
 import { loginUser, registerUser, saveQuizResult, checkUserStatus, getSystemSetting } from './services/storageService';
+import { mutateResults } from './hooks/useData';
 import { supabase } from './services/supabaseClient';
 import { ToastProvider, useToast } from './components/Toast';
 
 const AdminDashboard = lazy(() => import('./components/AdminDashboard').then(module => ({ default: module.AdminDashboard })));
-const QuizTaker = lazy(() => import('./components/QuizTaker').then(module => ({ default: module.QuizTaker })));
 const QuizResultView = lazy(() => import('./components/QuizResult').then(module => ({ default: module.QuizResultView })));
+const QuizTaker = lazy(() => import('./components/QuizTaker').then(module => ({ default: module.QuizTaker })));
 const UserDashboard = lazy(() => import('./components/UserDashboard').then(module => ({ default: module.UserDashboard })));
 
 const LoadingSpinner = () => (
@@ -165,6 +166,7 @@ const MainContent: React.FC = () => {
     
     try {
         await saveQuizResult(fullResult);
+        mutateResults();
         setCurrentResult(fullResult);
         setView('result');
     } catch (error: any) {
@@ -313,33 +315,31 @@ const MainContent: React.FC = () => {
         )}
 
         {/* Dashboard Views */}
-        {view !== 'result' && (
-            <>
-                {(user.role === UserRole.ADMIN || user.role === UserRole.SUPER_ADMIN) && (
-                    <AdminDashboard onViewResult={handleViewHistoryResult} currentUser={user} />
-                )}
+        <div style={{ display: view !== 'result' ? 'block' : 'none' }}>
+            {(user.role === UserRole.ADMIN || user.role === UserRole.SUPER_ADMIN) && (
+                <AdminDashboard onViewResult={handleViewHistoryResult} currentUser={user} />
+            )}
 
-                {user.role === UserRole.USER && (
-                <>
-                    {view === 'dashboard' && (
-                        <UserDashboard 
-                            user={user} 
-                            onStartQuiz={handleStartQuiz} 
-                            onViewResult={handleViewHistoryResult}
-                        />
-                    )}
-                    
-                    {view === 'quiz' && (
-                        <QuizTaker 
-                            configId={activeConfigId} 
-                            onComplete={handleQuizComplete} 
-                            onExit={() => setView('dashboard')} 
-                        />
-                    )}
-                </>
+            {user.role === UserRole.USER && (
+            <>
+                <div style={{ display: view === 'dashboard' ? 'block' : 'none' }}>
+                    <UserDashboard 
+                        user={user} 
+                        onStartQuiz={handleStartQuiz} 
+                        onViewResult={handleViewHistoryResult}
+                    />
+                </div>
+                
+                {view === 'quiz' && (
+                    <QuizTaker 
+                        configId={activeConfigId} 
+                        onComplete={handleQuizComplete} 
+                        onExit={() => setView('dashboard')} 
+                    />
                 )}
             </>
-        )}
+            )}
+        </div>
         </Suspense>
       </main>
     </div>

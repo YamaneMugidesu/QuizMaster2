@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient';
 import { User, UserRole } from '../types';
 import { logger } from './loggerService';
+import { getSystemSetting } from './systemService';
 
 // Helper to generate safe email from username (handles Chinese characters)
 const generateSafeEmail = (username: string): string => {
@@ -39,8 +40,6 @@ export const checkUserStatus = async (userId: string): Promise<boolean> => {
 
 export const registerUser = async (username: string, password: string): Promise<{ success: boolean; message: string }> => {
   // Check if registration is allowed
-  const { getSystemSetting } = await import('./systemService');
-  
   const allowRegistration = await getSystemSetting('allow_registration');
   if (allowRegistration === 'false') {
       logger.warn('AUTH', 'Blocked registration attempt (registration disabled)', { username });
@@ -119,24 +118,11 @@ export const loginUser = async (username: string, password: string): Promise<{ s
   const { data: profile, error: profileError } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
   
   if (profileError || !profile) {
-      logger.warn('AUTH', 'Profile fetch failed during login, using metadata fallback', { userId: data.user.id, error: profileError });
+      logger.warn('AUTH', 'Profile fetch failed during login', { userId: data.user.id, error: profileError });
       
-      // Fallback to user_metadata if profile fetch fails
-      const metadata = data.user.user_metadata;
-      if (metadata && metadata.username) {
-          return {
-              success: true,
-              user: {
-                  id: data.user.id,
-                  username: metadata.username,
-                  role: (metadata.role as UserRole) || UserRole.USER,
-                  createdAt: new Date(data.user.created_at).getTime(),
-                  isActive: true // Assume active on network error to prevent lockout
-              }
-          };
-      }
-      
-      return { success: false, message: '登录成功但无法获取用户信息，请稍后重试' };
+      // STRICT SECURITY: Do not fallback to metadata if profile is missing/error
+      // This ensures we always check is_active/is_deleted status
+      return { success: false, message: '登录失败：无法获取用户信息，请联系管理员' };
   }
 
   // Check Active Status

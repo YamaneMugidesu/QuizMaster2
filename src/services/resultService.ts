@@ -116,9 +116,10 @@ export const getPaginatedUserResultsByUserId = async (
   const from = (page - 1) * limit;
   const to = from + limit - 1;
 
+  // Optimize query: Use View to get lightweight attempts (scores only)
   const { data, count, error } = await supabase
-    .from('quiz_results')
-    .select('*', { count: 'exact' })
+    .from('quiz_results_summary_view')
+    .select('id, user_id, username, timestamp, score, max_score, passing_score, is_passed, total_questions, config_id, config_name, status, duration, attempts', { count: 'exact' })
     .eq('user_id', userId)
     .order('timestamp', { ascending: false })
     .range(from, to);
@@ -156,9 +157,10 @@ export const getPaginatedUserResults = async (
   limit: number, 
   searchTerm?: string
 ): Promise<{ data: QuizResult[]; total: number }> => {
+  // Optimize query: Use View to get lightweight attempts (scores only)
   let query = supabase
-    .from('quiz_results')
-    .select('*', { count: 'exact' })
+    .from('quiz_results_summary_view')
+    .select('id, user_id, username, timestamp, score, max_score, passing_score, is_passed, total_questions, config_id, config_name, status, duration, attempts', { count: 'exact' })
     .order('timestamp', { ascending: false });
 
   if (searchTerm) {
@@ -182,6 +184,21 @@ export const getPaginatedUserResults = async (
     data: mapped,
     total
   };
+};
+
+export const getResultById = async (id: string): Promise<QuizResult | null> => {
+  const { data, error } = await supabase
+    .from('quiz_results')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    console.error('Error fetching result by id:', error);
+    return null;
+  }
+
+  return mapResultFromDB(data as DBResult);
 };
 
 export const gradeQuiz = async (attempts: { questionId: string; userAnswer: string; maxScore: number }[]): Promise<{ attempts: any[]; score: number }> => {

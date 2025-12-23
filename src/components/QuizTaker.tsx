@@ -4,6 +4,7 @@ import { Question, QuestionType, QuizAttempt, QuizResult } from '../types';
 import { generateQuiz, gradeQuiz } from '../services/storageService';
 import { Button } from './Button';
 import { ImageWithPreview } from './ImageWithPreview';
+import { RichTextPreview } from './RichTextPreview';
 import { useToast } from './Toast';
 import { sanitizeHTML } from '../utils/sanitize';
 
@@ -458,9 +459,9 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
                     <span className="px-3 py-1 bg-gray-100 rounded-full text-xs font-medium text-gray-600">{getTypeLabel(currentQ.type)}</span>
                 </div>
               
-              {images.length > 0 && (
+                {images.length > 0 && (
                 <div className="mb-6 flex overflow-x-auto gap-4 pb-2">
-                    {images.map((img, idx) => (
+                    {images.map((img: string, idx: number) => (
                         <ImageWithPreview 
                             key={idx} 
                             src={img} 
@@ -471,16 +472,15 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
                 </div>
               )}
 
-              <h2 
-                className="text-2xl text-gray-900 mb-8 ql-editor rich-text-content" 
-                style={{ padding: 0 }}
-                dangerouslySetInnerHTML={{ __html: sanitizeHTML(currentQ.text) }} 
+              <RichTextPreview 
+                content={currentQ.text} 
+                className="text-2xl text-gray-900 mb-8"
               />
 
               <div className="space-y-4">
                 {currentQ.type === QuestionType.MULTIPLE_CHOICE || currentQ.type === QuestionType.TRUE_FALSE ? (
                   <div className="grid gap-4">
-                      {currentQ.options?.map((opt, idx) => (
+                      {currentQ.options?.map((opt: string, idx: number) => (
                           <label 
                             key={idx} 
                             className={`flex items-center p-4 border-2 rounded-xl cursor-pointer transition-all ${currentAnswer === opt ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-primary-200 hover:bg-gray-50'}`}
@@ -497,14 +497,17 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
                                 {currentQ.type === QuestionType.MULTIPLE_CHOICE && (
                                     <span className="font-bold mr-2 mt-0.5">{String.fromCharCode(65 + idx)}.</span>
                                 )}
-                                <span className="font-medium text-gray-700 rich-text-content" dangerouslySetInnerHTML={{ __html: sanitizeHTML(opt) }} />
+                                <RichTextPreview 
+                                    content={opt} 
+                                    className="font-medium text-gray-700" 
+                                />
                               </div>
                           </label>
                       ))}
                   </div>
                 ) : currentQ.type === QuestionType.MULTIPLE_SELECT ? (
                     <div className="grid gap-4">
-                        {currentQ.options?.map((opt, idx) => {
+                        {currentQ.options?.map((opt: string, idx: number) => {
                             const isChecked = selectedOptions.includes(opt);
                             return (
                                 <label 
@@ -520,7 +523,10 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
                                     />
                                     <div className="ml-3 flex items-start">
                                         <span className="font-bold mr-2 mt-0.5">{String.fromCharCode(65 + idx)}.</span>
-                                        <span className="font-medium text-gray-700 rich-text-content" dangerouslySetInnerHTML={{ __html: sanitizeHTML(opt) }} />
+                                        <RichTextPreview 
+                                            content={opt} 
+                                            className="font-medium text-gray-700" 
+                                        />
                                     </div>
                                 </label>
                             )

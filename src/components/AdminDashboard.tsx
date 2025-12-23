@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Question, QuestionType, Difficulty, GradeLevel, QuestionFormData, UserRole, QuizResult, User, SUBJECTS, QuizConfig, QuestionCategory } from '../types';
-import { saveQuestion, updateQuestion, deleteQuestion, toggleQuestionVisibility, deleteQuizResult, restoreQuestion, hardDeleteQuestion } from '../services/storageService';
+import { saveQuestion, updateQuestion, deleteQuestion, toggleQuestionVisibility, deleteQuizResult, restoreQuestion, hardDeleteQuestion, getQuestionById, getResultById } from '../services/storageService';
 import { useQuestions, useQuizConfigs, useAllResults, mutateQuestions, mutateQuizConfigs, mutateResults, mutateUsers } from '../hooks/useData';
 import { Button } from './Button';
 import { QuestionForm } from './QuestionForm';
@@ -9,9 +9,78 @@ import { UserManagement } from './UserManagement';
 import { QuizConfigForm } from './QuizConfigForm';
 import { ImageWithPreview } from './ImageWithPreview';
 import { GradingModal } from './GradingModal';
+import { RichTextPreview } from './RichTextPreview';
 import { useToast } from './Toast';
 import { sanitizeHTML } from '../utils/sanitize';
 import SystemMonitor from './SystemMonitor';
+
+interface ExpandableQuestionContentProps {
+  content: string;
+  isExpanded: boolean;
+  onToggle: () => void;
+}
+
+const ExpandableQuestionContent: React.FC<ExpandableQuestionContentProps> = ({ content, isExpanded, onToggle }) => {
+  const textRef = useRef<HTMLDivElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  useEffect(() => {
+    const checkOverflow = () => {
+      const el = textRef.current;
+      if (el && !isExpanded) {
+        setIsOverflowing(el.scrollHeight > el.clientHeight + 1);
+      }
+    };
+
+    checkOverflow();
+    // Add a small delay to ensure rendering is complete
+    const timer = setTimeout(checkOverflow, 100);
+    
+    window.addEventListener('resize', checkOverflow);
+    return () => {
+        window.removeEventListener('resize', checkOverflow);
+        clearTimeout(timer);
+    };
+  }, [content, isExpanded]);
+
+  return (
+    <div className="relative group">
+        <div 
+            ref={textRef}
+            className={`transition-all duration-200 ${isExpanded ? '' : 'line-clamp-2 max-h-[4.5em] overflow-hidden'} ${isOverflowing || isExpanded ? 'cursor-pointer' : ''}`}
+            onClick={() => {
+                if (isOverflowing || isExpanded) {
+                    onToggle();
+                }
+            }}
+            title={isExpanded ? "点击收起" : (isOverflowing ? "点击展开全文" : "")}
+        >
+            <RichTextPreview 
+                content={content} 
+                className={`text-lg font-medium text-gray-900 ${isExpanded ? '' : 'rich-text-content-inline'}`}
+            />
+        </div>
+        {(isOverflowing || isExpanded) && (
+            <button 
+                onClick={(e) => { e.stopPropagation(); onToggle(); }}
+                className="text-xs text-primary-600 hover:text-primary-800 mt-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+                {isExpanded ? (
+                    <>
+                        收起
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                    </>
+                ) : (
+                    <>
+                        展开全文
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                    </>
+                )}
+            </button>
+        )}
+    </div>
+  );
+};
 
 interface AdminDashboardProps {
   currentUser: User;
@@ -29,7 +98,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [filterSubject, setFilterSubject] = useState('');
   const [filterGrade, setFilterGrade] = useState('');
   const [filterType, setFilterType] = useState('');
@@ -38,11 +106,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Debounce Search
+  // Debounced Filter State
+  const [debouncedFilters, setDebouncedFilters] = useState({
+      search: '',
+      subject: '',
+      grade: '',
+      type: '',
+      difficulty: '',
+      category: ''
+  });
+
+  // Unified Debounce for all filters
   useEffect(() => {
-      const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 300);
+      const timer = setTimeout(() => {
+          setDebouncedFilters({
+              search: searchTerm,
+              subject: filterSubject,
+              grade: filterGrade,
+              type: filterType,
+              difficulty: filterDifficulty,
+              category: filterCategory
+          });
+      }, 300);
       return () => clearTimeout(timer);
-  }, [searchTerm]);
+  }, [searchTerm, filterSubject, filterGrade, filterType, filterDifficulty, filterCategory]);
 
   // Use SWR Hook for Questions
   const { 
@@ -50,12 +137,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       total: totalQuestions, 
       isLoading: isQuestionsLoading 
   } = useQuestions(currentQuestionPage, questionsPerPage, {
-      search: debouncedSearchTerm,
-      subject: filterSubject,
-      gradeLevel: filterGrade as GradeLevel,
-      type: filterType as QuestionType,
-      difficulty: filterDifficulty as Difficulty,
-      category: filterCategory as QuestionCategory,
+      search: debouncedFilters.search,
+      subject: debouncedFilters.subject,
+      gradeLevel: debouncedFilters.grade as GradeLevel,
+      type: debouncedFilters.type as QuestionType,
+      difficulty: debouncedFilters.difficulty as Difficulty,
+      category: debouncedFilters.category as QuestionCategory,
       isDeleted: showRecycleBin
   }, activeTab === 'list' || activeTab === 'create'); // Only fetch when in question list or create (create might need duplicate check but strictly list is main consumer)
 
@@ -84,7 +171,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   // Reset pagination when filters change
   useEffect(() => {
     setCurrentQuestionPage(1);
-  }, [debouncedSearchTerm, filterSubject, filterGrade, filterType, filterDifficulty, filterCategory]);
+  }, [debouncedFilters]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -92,6 +179,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
 
   // --- MODAL STATES ---
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
+  const [expandedQuestionIds, setExpandedQuestionIds] = useState<Set<string>>(new Set());
+
+  const toggleExpandQuestion = (id: string) => {
+      setExpandedQuestionIds(prev => {
+          const next = new Set(prev);
+          if (next.has(id)) {
+              next.delete(id);
+          } else {
+              next.add(id);
+          }
+          return next;
+      });
+  };
   
   // Delete Confirmation Modal State
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null);
@@ -192,6 +292,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       addToast('更新题目失败，请重试', 'error');
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleEditClick = async (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setProcessingId(id);
+    try {
+        const fullQuestion = await getQuestionById(id);
+        if (fullQuestion) {
+            setEditingQuestion(fullQuestion);
+        } else {
+            addToast('无法加载题目详情', 'error');
+        }
+    } catch (error) {
+        console.error('Failed to load question details:', error);
+        addToast('加载失败', 'error');
+    } finally {
+        setProcessingId(null);
     }
   };
 
@@ -306,6 +425,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
   };
 
   const getPartScores = (result: QuizResult) => {
+    // If attempts are not loaded (for performance), we can't show part scores
+    if (!result.attempts || result.attempts.length === 0) {
+        return null;
+    }
+
     if (!result.configId || quizConfigs.length === 0) return null;
     
     const config = quizConfigs.find(c => c.id === result.configId);
@@ -328,6 +452,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
             </span>
         );
     });
+  };
+
+  const handleViewResultDetail = async (e: React.MouseEvent, result: QuizResult) => {
+      e.stopPropagation();
+      setProcessingId(result.id);
+      try {
+          // If attempts are missing, fetch full result
+          let fullResult = result;
+          if (!result.attempts || result.attempts.length === 0) {
+              const fetched = await getResultById(result.id);
+              if (fetched) {
+                  fullResult = fetched;
+              } else {
+                  addToast('无法加载答题详情', 'error');
+                  return;
+              }
+          }
+          
+          const config = quizConfigs.find(c => c.id === fullResult.configId);
+          onViewResult({ ...fullResult, config });
+      } catch (error) {
+          console.error('Failed to load result details:', error);
+          addToast('加载详情失败', 'error');
+      } finally {
+          setProcessingId(null);
+      }
+  };
+
+  const handleStartGrading = async (e: React.MouseEvent, result: QuizResult) => {
+      e.stopPropagation();
+      setProcessingId(result.id);
+      try {
+          // Always fetch full result to ensure we have question text and answers for grading
+          // The list view might use a lightweight view that strips these details
+          let fullResult = result;
+          
+          // Check if we need to fetch (if attempts missing or missing question text)
+          const needsFetch = !result.attempts || result.attempts.length === 0 || !result.attempts[0].questionText;
+
+          if (needsFetch) {
+              const fetched = await getResultById(result.id);
+              if (fetched) {
+                  fullResult = fetched;
+              } else {
+                  addToast('无法加载答题详情', 'error');
+                  return;
+              }
+          }
+          
+          setGradingResult(fullResult);
+      } catch (error) {
+          console.error('Failed to load result details for grading:', error);
+          addToast('加载详情失败', 'error');
+      } finally {
+          setProcessingId(null);
+      }
   };
 
   // Calculate total pages
@@ -616,54 +796,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                                 )}
                                 {q.isDisabled && (
                                     <span className="inline-block px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700">
-                                        已屏蔽
-                                    </span>
-                                )}
-                            </div>
-                            <div className="text-lg font-medium text-gray-900 line-clamp-2 rich-text-content" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} dangerouslySetInnerHTML={{ __html: sanitizeHTML(q.text) }}></div>
-                            <div className="text-sm text-gray-500 mt-1 flex items-start">
+                                    已屏蔽
+                                </span>
+                            )}
+                        </div>
+                        <ExpandableQuestionContent 
+                            content={q.text} 
+                            isExpanded={expandedQuestionIds.has(q.id)} 
+                            onToggle={() => toggleExpandQuestion(q.id)} 
+                        />
+                        <div className="text-sm text-gray-500 mt-1 flex items-start">
                                 <span className="flex-shrink-0 mt-0.5">答案: </span>
                                 {q.type === QuestionType.FILL_IN_THE_BLANK ? (
                                     <div className="ml-1 flex-1 min-w-0">
-                                        {(() => {
-                                            try {
-                                                const answers = JSON.parse(q.correctAnswer);
-                                                if (Array.isArray(answers)) {
-                                                    return (
-                                                        <div className="truncate text-green-700 font-medium" title={answers.map(a => a.replace(/<[^>]+>/g, '')).join('; ')}>
-                                                            {answers.map((ans, idx) => (
-                                                                <span key={idx} className="mr-2">
-                                                                    <span className="text-gray-400 text-xs">({idx + 1})</span>
-                                                                    <span dangerouslySetInnerHTML={{ __html: sanitizeHTML(ans) }} className="inline-block align-middle rich-text-content-inline" />
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    );
-                                                }
-                                                return <span className="text-green-700 font-medium truncate block">{q.correctAnswer.replace(/<[^>]+>/g, '')}</span>;
-                                            } catch {
-                                                return <span className="text-green-700 font-medium truncate block">{q.correctAnswer.replace(/<[^>]+>/g, '')}</span>;
-                                            }
-                                        })()}
+                                        <RichTextPreview 
+                                            content={q.correctAnswer} 
+                                            className="text-green-700 font-medium truncate" 
+                                        />
                                     </div>
                                 ) : q.type === QuestionType.MULTIPLE_SELECT ? (
                                     <div className="flex flex-wrap gap-2 ml-1 max-h-12 overflow-hidden">
-                                        {(() => {
-                                            try {
-                                                const answers = JSON.parse(q.correctAnswer);
-                                                return Array.isArray(answers) ? answers.map((ans: string, idx: number) => (
-                                                    <div key={idx} className="font-semibold text-green-600 bg-green-50 px-2 rounded border border-green-100 rich-text-content inline-block text-xs" dangerouslySetInnerHTML={{ __html: sanitizeHTML(ans) }} />
-                                                )) : <span className="text-red-500">格式错误</span>;
-                                            } catch {
-                                                return <span className="font-semibold text-green-600 ml-1">{q.correctAnswer}</span>;
-                                            }
-                                        })()}
+                                        <RichTextPreview 
+                                            content={q.correctAnswer} 
+                                            className="font-semibold text-green-600 inline-block text-xs" 
+                                        />
                                     </div>
                                 ) : (
-                                    <div 
-                                        className="font-semibold text-green-600 ml-1 rich-text-content flex-1 min-w-0 break-words line-clamp-2" 
-                                        style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
-                                        dangerouslySetInnerHTML={{ __html: sanitizeHTML(q.correctAnswer) }} 
+                                    <RichTextPreview 
+                                        content={q.correctAnswer}
+                                        className="font-semibold text-green-600 ml-1 flex-1 min-w-0 break-words line-clamp-2" 
                                     />
                                 )}
                             </div>
@@ -715,7 +876,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                                             type="button"
                                             variant="secondary" 
                                             className="text-sm py-1 px-3" 
-                                            onClick={(e) => { e.stopPropagation(); setEditingQuestion(q); }}
+                                            onClick={(e) => handleEditClick(e, q.id)}
                                         >
                                             修改
                                         </Button>
@@ -827,7 +988,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                         <tr>
                           <th className="px-6 py-3 font-medium">用户</th>
                           <th className="px-6 py-3 font-medium">试卷名称</th>
-                          <th className="px-6 py-3 font-medium">时间</th>
+                          <th className="px-6 py-3 font-medium">提交时间</th>
                           <th className="px-6 py-3 font-medium">耗时</th>
                           <th className="px-6 py-3 font-medium">得分</th>
                           <th className="px-6 py-3 font-medium">状态</th>
@@ -839,10 +1000,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                             <React.Fragment key={result.id}>
                             <tr 
                                className="hover:bg-primary-50 transition-colors cursor-pointer"
-                               onClick={() => {
-                                   const config = quizConfigs.find(c => c.id === result.configId);
-                                   onViewResult({ ...result, config }); // Pass config to avoid lazy load delay
-                               }}
+                               onClick={(e) => handleViewResultDetail(e, result)}
                             >
                               <td className="px-6 py-4 font-medium text-gray-900">
                                  {result.username}
@@ -850,7 +1008,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                               <td className="px-6 py-4 text-sm text-gray-600 font-medium">
                                  {result.configName || quizConfigs.find(c => c.id === result.configId)?.name || '未知试卷'}
                               </td>
-                              <td className="px-6 py-4 text-sm text-gray-600">
+                              <td className="px-6 py-4 text-sm text-gray-600" title={`开始时间: ${new Date(result.timestamp - (result.duration || 0) * 1000).toLocaleString('zh-CN')}`}>
                                  {new Date(result.timestamp).toLocaleString('zh-CN')}
                               </td>
                               <td className="px-6 py-4 text-sm text-gray-600">
@@ -878,16 +1036,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                                  <div className="flex items-center gap-2">
                                      {result.status === 'pending_grading' ? (
                                          <button 
-                                             onClick={(e) => { e.stopPropagation(); setGradingResult(result); }}
+                                             onClick={(e) => handleStartGrading(e, result)}
                                              className="text-orange-600 hover:text-orange-800 font-bold border border-orange-200 bg-orange-50 px-3 py-1 rounded-md text-xs"
                                          >
-                                             去批改
+                                             {processingId === result.id ? '加载中...' : '去批改'}
                                          </button>
                                      ) : (
-                                         <span onClick={() => {
-                                             const config = quizConfigs.find(c => c.id === result.configId);
-                                             onViewResult({ ...result, config });
-                                         }} className="cursor-pointer hover:underline">查看详情</span>
+                                         <span onClick={(e) => handleViewResultDetail(e, result)} className="cursor-pointer hover:underline">
+                                             {processingId === result.id ? '加载中...' : '查看详情'}
+                                         </span>
                                      )}
                                      <button
                                          onClick={(e) => { e.stopPropagation(); setRecordToDelete(result.id); }}
@@ -901,14 +1058,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
                                  </div>
                               </td>
                             </tr>
-                            {/* Second line for Part Scores */}
-                            <tr className="bg-gray-50/50 border-b border-gray-100">
-                                <td colSpan={7} className="px-6 py-2 pb-4">
-                                    <div className="flex flex-wrap gap-2 pl-4 border-l-2 border-primary-200">
-                                        {getPartScores(result) || <span className="text-xs text-gray-400">无分项详情</span>}
-                                    </div>
-                                </td>
-                            </tr>
+                            {/* Second line for Part Scores - Only show if attempts are loaded or we have summary data */}
+                            {(result.attempts && result.attempts.length > 0) && (
+                                <tr className="bg-gray-50/50 border-b border-gray-100">
+                                    <td colSpan={7} className="px-6 py-2 pb-4">
+                                        <div className="flex flex-wrap gap-2 pl-4 border-l-2 border-primary-200">
+                                            {getPartScores(result)}
+                                        </div>
+                                    </td>
+                                </tr>
+                            )}
                             </React.Fragment>
                          ))}
                       </tbody>
