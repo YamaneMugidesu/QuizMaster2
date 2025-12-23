@@ -27,12 +27,10 @@ const TYPES = [
     { label: '填空', value: QuestionType.FILL_IN_THE_BLANK },
     { label: '简答', value: QuestionType.SHORT_ANSWER },
 ];
-const CATEGORIES = [
-    { label: '基础知识', value: QuestionCategory.BASIC },
-    { label: '易错题', value: QuestionCategory.MISTAKE },
-    { label: '写解析', value: QuestionCategory.EXPLANATION },
-    { label: '标准理解', value: QuestionCategory.STANDARD },
-];
+const CATEGORIES = Object.values(QuestionCategory).map(c => ({
+    label: c,
+    value: c
+}));
 
 export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
     const [showRecycleBin, setShowRecycleBin] = useState(false);

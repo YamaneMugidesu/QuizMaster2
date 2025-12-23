@@ -355,10 +355,9 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({ initialData, onSubmi
                 value={category}
                 onChange={(e) => setCategory(e.target.value as QuestionCategory)}
              >
-                <option value={QuestionCategory.BASIC}>基础知识</option>
-                <option value={QuestionCategory.MISTAKE}>易错题</option>
-                <option value={QuestionCategory.EXPLANATION}>写解析</option>
-                <option value={QuestionCategory.STANDARD}>标准理解</option>
+                {Object.values(QuestionCategory).map(c => (
+                    <option key={c} value={c}>{c}</option>
+                ))}
              </select>
           </div>
         </div>

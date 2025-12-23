@@ -23,7 +23,8 @@ export enum QuestionCategory {
   BASIC = '基础知识',
   MISTAKE = '易错题',
   EXPLANATION = '写解析',
-  STANDARD = '标准理解'
+  STANDARD = '标准理解',
+  CONFIRMATION = '问题确认'
 }
 
 export interface Question {
