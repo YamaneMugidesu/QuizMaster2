@@ -460,7 +460,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
       try {
           // If attempts are missing, fetch full result
           let fullResult = result;
-          if (!result.attempts || result.attempts.length === 0) {
+          // Check if we need to fetch (if attempts missing or missing question text in first attempt)
+          // This ensures we have the snapshot data which QuizResultView prefers
+          const needsFetch = !result.attempts || result.attempts.length === 0 || !result.attempts[0].questionText;
+
+          if (needsFetch) {
               const fetched = await getResultById(result.id);
               if (fetched) {
                   fullResult = fetched;
