@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { QuizConfig, QuizPartConfig, Difficulty, QuestionType, GradeLevel, QuestionCategory } from '../types';
+import { QuizConfig, QuizPartConfig, Difficulty, QuestionType, GradeLevel, QuestionCategory, SUBJECTS } from '../types';
 import { saveQuizConfig, deleteQuizConfig, getAvailableQuestionCount, toggleQuizConfigVisibility, restoreQuizConfig, hardDeleteQuizConfig } from '../services/storageService';
 import { useQuizConfigs, mutateQuizConfigs } from '../hooks/useData';
 import { Button } from './Button';
@@ -10,7 +10,6 @@ interface QuizConfigFormProps {
     onSave?: () => void;
 }
 
-const SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '地理', '政治', '历史', '综合'];
 const GRADES = [
     { label: '小学', value: GradeLevel.PRIMARY },
     { label: '初中', value: GradeLevel.JUNIOR },
