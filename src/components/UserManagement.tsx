@@ -81,7 +81,7 @@ export const UserManagement: React.FC = () => {
 
     setIsSubmitting(true);
     try {
-        const result = await adminAddUser(newUsername, newPassword, newRole);
+        const result = await adminAddUser(newUsername.trim(), newPassword.trim(), newRole);
         if (result.success) {
             setNewUsername('');
             setNewPassword('');
@@ -146,13 +146,13 @@ export const UserManagement: React.FC = () => {
     setIsSaving(true);
     try {
         const updates: any = {
-            username: editingUser.username,
+            // username: editingUser.username, // Username editing disabled
             role: editingUser.role,
             isActive: editingUser.isActive
         };
         
         if (editingUser.password && editingUser.password.trim() !== '') {
-            updates.password = editingUser.password;
+            updates.password = editingUser.password.trim();
         }
         
         const { success, error } = await updateUserProfile(editingUser.id, updates);
@@ -421,12 +421,13 @@ export const UserManagement: React.FC = () => {
                 
                 <div className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">用户名</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">用户名 <span className="text-xs text-gray-400 font-normal">(不可修改)</span></label>
                         <input 
                             type="text" 
-                            className="w-full px-3 py-2 border rounded-md text-sm"
+                            className="w-full px-3 py-2 border rounded-md text-sm bg-gray-100 text-gray-500 cursor-not-allowed"
                             value={editingUser.username}
-                            onChange={(e) => setEditingUser({...editingUser, username: e.target.value})}
+                            disabled={true}
+                            readOnly={true}
                         />
                     </div>
                     <div>

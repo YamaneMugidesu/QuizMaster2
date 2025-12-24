@@ -87,8 +87,11 @@ export const registerUser = async (username: string, password: string): Promise<
 };
 
 export const loginUser = async (username: string, password: string): Promise<{ success: boolean; user?: User; message?: string }> => {
+  // Trim username to avoid accidental spaces
+  const cleanUsername = username.trim();
+  
   // Try with safe email (Hex format) first - for new users and Chinese usernames
-  let email = generateSafeEmail(username);
+  let email = generateSafeEmail(cleanUsername);
   
   let { data, error } = await supabase.auth.signInWithPassword({
     email,
@@ -96,8 +99,8 @@ export const loginUser = async (username: string, password: string): Promise<{ s
   });
 
   // If failed, and username is ASCII, try legacy email format (backward compatibility)
-  if (error && /^[\x00-\x7F]*$/.test(username)) {
-      const legacyEmail = `${username}@quizmaster.com`;
+  if (error && /^[\x00-\x7F]*$/.test(cleanUsername)) {
+      const legacyEmail = `${cleanUsername}@quizmaster.com`;
       const { data: legacyData, error: legacyError } = await supabase.auth.signInWithPassword({
           email: legacyEmail,
           password
@@ -128,11 +131,11 @@ export const loginUser = async (username: string, password: string): Promise<{ s
   // Check Active Status
   if (profile.is_active === false) { // Default to true if null/undefined
       await supabase.auth.signOut();
-      logger.warn('AUTH', 'Deactivated user attempted login', { username });
+      logger.warn('AUTH', 'Deactivated user attempted login', { username: cleanUsername });
       return { success: false, message: '您的账户已被停用，请联系管理员开通' };
   }
 
-  logger.info('AUTH', 'User logged in', { username, userId: profile.id, role: profile.role });
+  logger.info('AUTH', 'User logged in', { username: cleanUsername, userId: profile.id, role: profile.role });
 
   return {
       success: true,
@@ -203,20 +206,21 @@ export const updateUserProfile = async (userId: string, updates: any): Promise<{
     const { error } = await supabase.from('profiles').update({
         username: profileUpdates.username,
         role: profileUpdates.role,
-
         is_active: profileUpdates.isActive
     }).eq('id', userId);
 
     if (error) return { success: false, error };
     
-    // Update password if provided
-    if (password) {
-        const { data, error: pwdError } = await supabase.rpc('admin_update_user_password', {
-            target_user_id: userId,
-            new_password: password
+    // Update auth.users (Email/Username sync and Password)
+    // We always pass username if it exists in updates, to ensure auth.users email is synced
+    if (profileUpdates.username || password) {
+        const { data, error: rpcError } = await supabase.rpc('admin_update_user_details', {
+            user_id: userId,
+            new_username: profileUpdates.username || null,
+            new_password: password || null
         });
         
-        if (pwdError) return { success: false, error: pwdError };
+        if (rpcError) return { success: false, error: rpcError };
         if (data && !data.success) return { success: false, error: { message: data.message } };
     }
     
@@ -230,6 +234,7 @@ export const getPaginatedUsers = async (page: number, limit: number): Promise<{ 
     const { data, count, error } = await supabase
         .from('profiles')
         .select('*', { count: 'exact' })
+        .neq('is_deleted', true) // Filter out deleted users (safer than eq false)
         .order('created_at', { ascending: false })
         .range(from, to);
         

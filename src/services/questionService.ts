@@ -118,36 +118,79 @@ export const getQuestionById = async (id: string): Promise<Question | null> => {
 };
 
 export const getQuestionsByIds = async (ids: string[], includeDeleted: boolean = false): Promise<Question[]> => {
-    if (ids.length === 0) return [];
-    // Chunking to avoid URL length limits if too many IDs (though unlikely for a quiz)
-    const chunkSize = 20;
+    // Filter out empty IDs and ensure unique
+    const uniqueIds = Array.from(new Set(ids.filter(id => id && id.trim() !== '')));
+    
+    if (uniqueIds.length === 0) return [];
+
+    // Filter out invalid UUIDs to prevent "invalid input syntax for type uuid" error
+    // UUID regex pattern (standard)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const validIds = uniqueIds.filter(id => uuidRegex.test(id));
+
+    if (validIds.length === 0) {
+        if (uniqueIds.length > 0) {
+            logger.warn('DB', 'All provided IDs were invalid UUIDs', { invalidIds: uniqueIds });
+        }
+        return [];
+    }
+
+    if (validIds.length < uniqueIds.length) {
+        logger.warn('DB', 'Some IDs were filtered out because they are not valid UUIDs', { 
+            totalProvided: uniqueIds.length, 
+            validCount: validIds.length,
+            invalidSample: uniqueIds.filter(id => !uuidRegex.test(id)).slice(0, 3)
+        });
+    }
+
+    // Chunking to avoid URL length limits if too many IDs
+    // Optimized chunk size for better reliability
+    const chunkSize = 15;
     const chunks = [];
-    for (let i = 0; i < ids.length; i += chunkSize) {
-        chunks.push(ids.slice(i, i + chunkSize));
+    for (let i = 0; i < validIds.length; i += chunkSize) {
+        chunks.push(validIds.slice(i, i + chunkSize));
     }
 
     let allQuestions: DBQuestion[] = [];
 
-    const promises = chunks.map(async (chunk) => {
-        let query = supabase.from('questions').select('*').in('id', chunk);
-        if (!includeDeleted) {
-            query = query.neq('is_deleted', true);
-        }
-        
-        const { data, error } = await query;
-        if (error) {
-            logger.error('DB', 'Error fetching questions by IDs', { ids: chunk }, error);
+    // Helper for retry logic
+    const fetchChunk = async (chunk: string[], retries = 3): Promise<any[]> => {
+        try {
+            let query = supabase.from('questions').select('*').in('id', chunk);
+            if (!includeDeleted) {
+                query = query.neq('is_deleted', true);
+            }
+            
+            const { data, error } = await query;
+            if (error) throw error;
+            return data as any[];
+        } catch (error: any) {
+            if (retries > 0) {
+                // Exponential backoff: 500ms, 1000ms, 2000ms
+                const delay = 500 * Math.pow(2, 3 - retries);
+                logger.warn('DB', `Retrying fetch for chunk (attempts left: ${retries})`, { chunkSample: chunk[0], delay });
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return fetchChunk(chunk, retries - 1);
+            }
+            // Log full error on final failure
+            logger.error('DB', 'Failed to fetch chunk after retries', { chunk, error: error.message || error }, error);
             throw error;
         }
-        return data as any[];
-    });
+    };
 
-    const results = await Promise.all(promises);
-    results.forEach(data => {
-        if (data) {
-            allQuestions = [...allQuestions, ...data];
+    // Execute fetches sequentially to reduce concurrent connection pressure
+    // Parallel fetching can trigger rate limits or connection timeouts
+    for (const chunk of chunks) {
+        try {
+            const data = await fetchChunk(chunk);
+            if (data) {
+                allQuestions = [...allQuestions, ...data];
+            }
+        } catch (e) {
+            // Continue fetching other chunks even if one fails, but log it
+            logger.error('DB', 'Skipping failed chunk', { chunkSample: chunk[0] });
         }
-    });
+    }
     
     // Sort to match order of IDs (optional but nice)
     // const idMap = new Map(allQuestions.map(q => [q.id, q]));
