@@ -44,14 +44,14 @@ const mapResultFromDB = (r: DBResult): QuizResult => ({
 
 // --- API ---
 
-export const saveQuizResult = async (result: QuizResult): Promise<void> => {
+export const saveQuizResult = async (result: QuizResult): Promise<QuizResult> => {
   // Check if user is still active before saving
   const isActive = await checkUserStatus(result.userId);
   if (!isActive) {
     throw new Error('User account is deactivated or deleted. Cannot save result.');
   }
 
-  const { error } = await supabase.from('quiz_results').insert([{
+  const { data, error } = await supabase.from('quiz_results').insert([{
     user_id: result.userId,
     username: result.username,
     score: result.score,
@@ -65,13 +65,15 @@ export const saveQuizResult = async (result: QuizResult): Promise<void> => {
     timestamp: result.timestamp,
     status: result.status || 'completed',
     duration: result.duration
-  }]);
+  }]).select().single();
 
   if (error) {
     logger.error('USER_ACTION', 'Error saving quiz result', { userId: result.userId, score: result.score }, error);
     throw error;
   }
   
+  const savedResult = mapResultFromDB(data as DBResult);
+
   logger.info('USER_ACTION', 'Quiz result saved', { 
     userId: result.userId, 
     username: result.username,
@@ -79,8 +81,11 @@ export const saveQuizResult = async (result: QuizResult): Promise<void> => {
     score: result.score, 
     passed: result.isPassed,
     duration: result.duration,
-    totalQuestions: result.totalQuestions
+    totalQuestions: result.totalQuestions,
+    resultId: savedResult.id
   });
+
+  return savedResult;
 };
 
 export const deleteQuizResult = async (id: string): Promise<void> => {

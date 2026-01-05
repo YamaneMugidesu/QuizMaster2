@@ -38,8 +38,10 @@ export const QuizResultView: React.FC<QuizResultProps> = ({ result, onRetry, onE
       const load = async () => {
           let currentResult = result;
 
-          // If attempts are missing (due to list optimization), fetch full details
-          if (!currentResult.attempts || currentResult.attempts.length === 0) {
+          // If attempts are missing (due to list optimization) or lightweight (missing questionText snapshots), fetch full details
+          const isLightweight = currentResult.attempts && currentResult.attempts.length > 0 && !currentResult.attempts[0].questionText;
+          
+          if (!currentResult.attempts || currentResult.attempts.length === 0 || isLightweight) {
               const fullResult = await getResultById(result.id);
               if (fullResult) {
                   currentResult = fullResult;

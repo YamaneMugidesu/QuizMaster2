@@ -84,27 +84,40 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
         }
     }, [selectedConfigId, configs]);
 
+    // Helper for UUID generation that works in all contexts (including non-secure contexts)
+    const generateUUID = () => {
+        if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+            return crypto.randomUUID();
+        }
+        // Fallback for environments where crypto.randomUUID is not available (e.g. non-HTTPS)
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    };
+
     const handleCreateConfig = async () => {
         setIsCreating(true);
         try {
             const newConfig: QuizConfig = {
-                // Fix: Use UUID for ID to match database schema (uuid type)
-                id: crypto.randomUUID(),
+                // Fix: Use robust UUID generation
+                id: generateUUID(),
                 name: '新试卷配置',
                 description: '这是一份新的试卷配置',
                 totalQuestions: 0,
                 passingScore: 0,
                 createdAt: Date.now(),
                 parts: [],
-                quizMode: 'practice'
+                quizMode: 'practice',
+                isPublished: false
             };
             await saveQuizConfig(newConfig);
             mutateQuizConfigs();
             setSelectedConfigId(newConfig.id);
             addToast('新试卷配置已创建', 'success');
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to create config:', error);
-            addToast('创建失败，请重试', 'error');
+            addToast(`创建失败: ${error.message || '请重试'}`, 'error');
         } finally {
             setIsCreating(false);
         }

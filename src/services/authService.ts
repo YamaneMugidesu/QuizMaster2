@@ -67,7 +67,9 @@ export const registerUser = async (username: string, password: string): Promise<
       const { error: profileError } = await supabase.from('profiles').insert({
           id: signUpData.user.id,
           username,
-          role: UserRole.USER
+          role: UserRole.USER,
+          is_active: true,
+          is_deleted: false
       });
       if (profileError) {
           // Check for duplicate key error (23505), which means the DB trigger already created the profile

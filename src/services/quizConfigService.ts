@@ -100,23 +100,25 @@ export const saveQuizConfig = async (config: QuizConfig): Promise<void> => {
     total_questions: rest.totalQuestions,
     created_at: rest.createdAt,
     quiz_mode: rest.quizMode || 'practice',
-    is_published: rest.isPublished
+    is_published: rest.isPublished ?? false,
+    is_deleted: false
   };
 
-  // Check if updating existing config (must have valid UUID)
-  if (id && id.length > 30) {
-        // 1. Fetch old data
-        let oldConfig: QuizConfig | undefined;
-        try {
-            const { data, error } = await supabase.from('quiz_configs').select('*').eq('id', id).single();
-            if (error) {
-                console.error('Error fetching old config for diff:', error);
-            }
-            if (data) oldConfig = mapConfigFromDB(data as DBConfig);
-        } catch (e) {
-            console.error('Exception fetching old config:', e);
-        }
+  // Check if updating existing config (must have valid UUID AND exist in DB)
+  let isUpdate = false;
+  let oldConfig: QuizConfig | undefined;
 
+  if (id && id.length > 30) {
+      // Try to find the existing record
+      const { data, error } = await supabase.from('quiz_configs').select('*').eq('id', id);
+      
+      if (!error && data && data.length > 0) {
+          isUpdate = true;
+          oldConfig = mapConfigFromDB(data[0] as DBConfig);
+      }
+  }
+
+  if (isUpdate) {
         const { error } = await supabase.from('quiz_configs').update(dbPayload).eq('id', id);
         // === 第一道防线：数据库原子性检查 ===
         // 如果数据库更新失败，这里会直接抛出异常，中断流程。

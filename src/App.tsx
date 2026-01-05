@@ -165,9 +165,10 @@ const MainContent: React.FC = () => {
     };
     
     try {
-        await saveQuizResult(fullResult);
+        const savedResult = await saveQuizResult(fullResult);
         mutateResults();
-        setCurrentResult(fullResult);
+        // Use the saved result which contains the real DB ID
+        setCurrentResult(savedResult);
         setView('result');
     } catch (error: any) {
         console.error('Failed to save result:', error);

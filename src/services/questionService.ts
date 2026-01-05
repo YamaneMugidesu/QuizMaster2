@@ -241,7 +241,8 @@ export const saveQuestion = async (question: Question): Promise<Question> => {
     is_disabled: rest.isDisabled || false,
     score: rest.score,
     needs_grading: rest.needsGrading,
-    explanation: rest.explanation
+    explanation: rest.explanation,
+    is_deleted: false
   };
 
   const { data, error } = await supabase
