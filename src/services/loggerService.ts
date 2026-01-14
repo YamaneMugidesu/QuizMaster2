@@ -19,6 +19,12 @@ class LoggerService {
         try {
             // Get current user if not provided
             let userId = entry.user_id;
+            
+            // Try to extract from details if not in entry
+            if (!userId && entry.details && entry.details.userId) {
+                userId = entry.details.userId;
+            }
+
             if (!userId) {
                 const { data: { session } } = await supabase.auth.getSession();
                 userId = session?.user?.id;

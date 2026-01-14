@@ -24,7 +24,9 @@ export enum QuestionCategory {
   MISTAKE = '易错题',
   EXPLANATION = '写解析',
   STANDARD = '标准理解',
-  CONFIRMATION = '问题确认'
+  CONFIRMATION = '问题确认',
+  SAFETY = '内容安全',
+  MATCHING = '匹配性'
 }
 
 export interface Question {

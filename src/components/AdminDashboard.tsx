@@ -413,6 +413,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser, onV
           case QuestionCategory.EXPLANATION: return 'bg-blue-100 text-blue-800 border-blue-200';
           case QuestionCategory.STANDARD: return 'bg-green-100 text-green-800 border-green-200';
           case QuestionCategory.CONFIRMATION: return 'bg-purple-100 text-purple-800 border-purple-200';
+          case QuestionCategory.SAFETY: return 'bg-orange-100 text-orange-800 border-orange-200';
+          case QuestionCategory.MATCHING: return 'bg-teal-100 text-teal-800 border-teal-200';
           case QuestionCategory.BASIC: 
           default: return 'bg-gray-100 text-gray-800 border-gray-200';
       }

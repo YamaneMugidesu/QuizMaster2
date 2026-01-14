@@ -74,7 +74,7 @@ export const saveQuizResult = async (result: QuizResult): Promise<QuizResult> =>
   
   const savedResult = mapResultFromDB(data as DBResult);
 
-  logger.info('USER_ACTION', 'Quiz result saved', { 
+  await logger.info('USER_ACTION', 'Quiz result saved', { 
     userId: result.userId, 
     username: result.username,
     configName: result.configName,
@@ -95,7 +95,7 @@ export const deleteQuizResult = async (id: string): Promise<void> => {
         throw error;
     }
     
-    logger.warn('USER_ACTION', 'Quiz result deleted', { resultId: id });
+    await logger.warn('USER_ACTION', 'Quiz result deleted', { resultId: id });
 };
 
 export const getUserResults = async (userId: string): Promise<QuizResult[]> => {
@@ -206,6 +206,51 @@ export const getResultById = async (id: string): Promise<QuizResult | null> => {
   return mapResultFromDB(data as DBResult);
 };
 
+// Helper: Normalize answer for comparison
+// 1. Removes HTML tags
+// 2. Removes invisible characters (ZWSP, etc)
+// 3. Handles Chinese text spacing (removes all spaces in Chinese context)
+// 4. Standardizes basic punctuation
+const normalizeAnswer = (str: string): string => {
+    if (!str) return '';
+    
+    // Remove HTML tags
+    let s = str.replace(/<[^>]+>/g, '');
+    
+    // Remove invisible characters (Zero Width Space, etc.)
+    // \u200B: Zero Width Space
+    // \uFEFF: Zero Width No-Break Space / BOM
+    // \u00A0: Non-Breaking Space
+    s = s.replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ');
+    
+    // Trim and Lowercase
+    s = s.trim().toLowerCase();
+    
+    // Check if string contains Chinese characters or punctuation
+    // \u4e00-\u9fa5: CJK Unified Ideographs
+    // \u3000-\u303f: CJK Symbols and Punctuation
+    // \uff00-\uffef: Fullwidth ASCII variants
+    const hasChinese = /[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/.test(s);
+    
+    if (hasChinese) {
+        // For Chinese text, spaces are usually irrelevant formatting issues
+        // Remove ALL whitespace to ensure "字 符" matches "字符"
+        s = s.replace(/\s+/g, '');
+        
+        // Normalize common punctuation variants if needed? 
+        // For now, strict whitespace removal fixes 99% of "looks same" issues
+        
+        // Optional: Normalize Chinese punctuation to English if we want extreme leniency
+        // But for a language quiz, punctuation matters.
+        // We only strip spaces.
+    } else {
+        // For non-Chinese text, collapse multiple spaces to single space
+        s = s.replace(/\s+/g, ' ');
+    }
+    
+    return s;
+};
+
 export const gradeQuiz = async (attempts: { questionId: string; userAnswer: string; maxScore: number }[]): Promise<{ attempts: any[]; score: number }> => {
     const questionIds = attempts.map(a => a.questionId);
     
@@ -284,24 +329,15 @@ export const gradeQuiz = async (attempts: { questionId: string; userAnswer: stri
           } else {
               isCorrect = correctParts.every((cPart, idx) => {
                   const uPart = userParts[idx] || '';
-                  const cleanCorrect = cPart.replace(/<[^>]+>/g, '').trim().toLowerCase();
-                  const cleanUser = uPart.trim().toLowerCase();
+                  const cleanCorrect = normalizeAnswer(cPart);
+                  const cleanUser = normalizeAnswer(uPart);
                   return cleanUser === cleanCorrect;
               });
           }
       } else {
           // Short Answer Auto-Grade
-          // Normalize whitespace: 
-          // 1. Replace newlines and multiple spaces with a single space
-          // 2. Remove spaces between Chinese characters (to handle user-added newlines in Chinese text correctly)
-          const normalize = (str: string) => {
-              let s = str.replace(/\s+/g, ' ').trim().toLowerCase();
-              // Remove spaces between Chinese characters
-              return s.replace(/([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])/g, '$1$2');
-          };
-          
-          const cleanCorrectAnswer = normalize((q.correctAnswer || '').replace(/<[^>]+>/g, ''));
-          const cleanUserAnswer = normalize(userAnswer);
+          const cleanCorrectAnswer = normalizeAnswer(q.correctAnswer || '');
+          const cleanUserAnswer = normalizeAnswer(userAnswer);
           
           isCorrect = cleanUserAnswer === cleanCorrectAnswer;
       }
@@ -348,7 +384,7 @@ export const gradeQuizResult = async (
   }
   
   if (logContext?.type === 'SINGLE_UPDATE') {
-      logger.info('USER_ACTION', 'Admin updated single question score', { 
+      await logger.info('USER_ACTION', 'Admin updated single question score', { 
           resultId, 
           questionId: logContext.questionId,
           oldScore: logContext.oldScore,
@@ -357,6 +393,6 @@ export const gradeQuizResult = async (
           isPassed
       });
   } else {
-      logger.info('USER_ACTION', 'Admin graded/updated quiz result', { resultId, finalScore, isPassed });
+      await logger.info('USER_ACTION', 'Admin graded/updated quiz result', { resultId, finalScore, isPassed });
   }
 };

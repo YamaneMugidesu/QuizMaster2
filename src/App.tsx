@@ -44,6 +44,34 @@ const MainContent: React.FC = () => {
     return () => clearInterval(intervalId);
   }, [user]);
 
+  // Listen for auth changes (Token Refresh, Sign Out, etc.)
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      // Cast event to string to avoid TypeScript errors for events not yet in the type definition
+      const eventName = event as string;
+      
+      if (eventName === 'SIGNED_OUT' || eventName === 'USER_DELETED') {
+        // Clear local state immediately
+        setUser(null);
+        setView('dashboard');
+        setCurrentResult(null);
+        setActiveConfigId('');
+      } else if (eventName === 'TOKEN_REFRESH_FAILED') {
+        // Token is dead, force logout
+        console.warn("Token refresh failed, logging out");
+        addToast('登录已过期，请重新登录', 'error');
+        setUser(null);
+        setView('dashboard');
+        setCurrentResult(null);
+        setActiveConfigId('');
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
   // Restore Session
   useEffect(() => {
     const restoreSession = async () => {
@@ -147,7 +175,20 @@ const MainContent: React.FC = () => {
     }
   };
 
-  const handleStartQuiz = (configId: string) => {
+  const handleStartQuiz = async (configId: string) => {
+      if (!user) return;
+      
+      setIsProcessing(true);
+      // Verify user status before starting
+      const isActive = await checkUserStatus(user.id);
+      setIsProcessing(false);
+
+      if (!isActive) {
+          addToast('您的账号已被禁用或删除，无法开始答题', 'error');
+          handleLogout();
+          return;
+      }
+
       setActiveConfigId(configId);
       setView('quiz');
   };

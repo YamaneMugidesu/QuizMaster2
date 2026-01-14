@@ -22,6 +22,18 @@ export const checkUserStatus = async (userId: string): Promise<boolean> => {
   // If there's an error (e.g. network issue), we assume the user is valid to prevent accidental logout
   // We only return false if we explicitly get data saying the user is deleted or inactive
   if (error) {
+    // Fix: Handle "Row not found" (PGRST116) as inactive/deleted
+    if (error.code === 'PGRST116') {
+        logger.warn('AUTH', 'User profile not found (Hard Deleted)', { userId });
+        return false;
+    }
+
+    // Handle Auth errors (Token expired/invalid)
+    if (error.code === 'PGRST301' || (error.message && (error.message.includes('JWT expired') || error.message.includes('Invalid token')))) {
+        logger.warn('AUTH', 'Token expired or invalid during status check', { userId });
+        return false;
+    }
+
     // Only log if it's NOT a network error to avoid spamming logs during connection drops
     if (error.message && !error.message.includes('Failed to fetch')) {
         logger.warn('AUTH', 'Error checking user status, assuming active', { userId, error });
