@@ -1,7 +1,7 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { User, UserRole, QuizResult } from './types';
 import { Button } from './components/Button';
-import { loginUser, registerUser, saveQuizResult, checkUserStatus, getSystemSetting, getQuizConfig, hasUserCompletedQuiz } from './services/storageService';
+import { loginUser, registerUser, saveQuizResult, checkUserStatus, getSystemSetting, getQuizConfig, hasUserAttemptedQuiz } from './services/storageService';
 import { mutateResults } from './hooks/useData';
 import { supabase } from './services/supabaseClient';
 import { ToastProvider, useToast } from './components/Toast';
@@ -221,10 +221,10 @@ const MainContent: React.FC = () => {
       try {
           const config = await getQuizConfig(configId);
           if (config && config.allowOneAttempt) {
-              const hasCompleted = await hasUserCompletedQuiz(user.id, configId, config.lastResetAt);
-              if (hasCompleted) {
+              const hasAttempted = await hasUserAttemptedQuiz(user.id, configId, config.lastResetAt);
+              if (hasAttempted) {
                   setIsProcessing(false);
-                  addToast('该试卷仅允许答题一次，您已完成答题', 'warning');
+                  addToast('该试卷仅允许答题一次，您已提交过答卷', 'warning');
                   return;
               }
           }
@@ -285,7 +285,7 @@ const MainContent: React.FC = () => {
                     className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:outline-none"
                     value={username}
                     onChange={e => setUsername(e.target.value)}
-                    placeholder="请输入用户名"
+                    placeholder={authMode === 'register' ? '请填写您的真实姓名' : '请输入用户名'}
                  />
              </div>
              <div key="password-field">
@@ -324,7 +324,7 @@ const MainContent: React.FC = () => {
                                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:outline-none"
                                 value={providerName}
                                 onChange={e => setProviderName(e.target.value)}
-                                placeholder="请输入供应商名称"
+                                placeholder="填写供应商名称首字母简写"
                             />
                         </div>
 

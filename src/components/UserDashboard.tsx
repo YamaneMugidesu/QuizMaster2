@@ -40,7 +40,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onStartQuiz,
   const { configs: allConfigs, isLoading: isConfigsLoading } = useQuizConfigs();
   const { results: history, total: totalHistory, isLoading: isHistoryLoading } = useUserResults(user.id, currentPage, itemsPerPage);
 
-  // Fetch completed quizzes
+  // Fetch attempted quizzes
   useEffect(() => {
     const fetchCompleted = async () => {
         try {
@@ -55,17 +55,16 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ user, onStartQuiz,
                  const configMap = new Map(allConfigs.map(c => [c.id, c]));
                  
                  results.forEach(r => {
-                     // Check if result is valid and completed
-                     if (r.status === 'completed' && r.configId) {
+                     if (r.configId) {
                          const config = configMap.get(r.configId);
                          if (config) {
-                             // Only count if attempt is AFTER the last reset
-                             const cutoff = config.lastResetAt || 0;
+                             const cutoff = config.lastResetAt && config.lastResetAt > 0
+                               ? (config.lastResetAt <= Date.now() ? config.lastResetAt : 0)
+                                : 0;
                              if (r.timestamp > cutoff) {
                                  completedIds.push(r.configId);
                              }
                          } else {
-                             // If we can't find config, we assume it's completed (safe default)
                              completedIds.push(r.configId);
                          }
                      }

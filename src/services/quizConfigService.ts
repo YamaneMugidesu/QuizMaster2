@@ -291,31 +291,41 @@ export const generateQuiz = async (configId: string): Promise<{
 
         // 0.1 Check for "Allow One Attempt" restriction
         if (config && config.allow_one_attempt) {
+            const cutoff = config.last_reset_at && config.last_reset_at > 0
+                ? (config.last_reset_at <= Date.now() ? config.last_reset_at : 0)
+                : 0;
+
             let query = supabase
                 .from('quiz_results')
                 .select('*', { count: 'exact', head: true })
                 .eq('user_id', user.user.id)
-                .eq('config_id', configId)
-                .eq('status', 'completed');
+                .eq('config_id', configId);
             
-            // Check last_reset_at to ignore results before the reset
-            if (config.last_reset_at && config.last_reset_at > 0) {
-                query = query.gt('timestamp', config.last_reset_at);
+            if (cutoff > 0) {
+                query = query.gt('timestamp', cutoff);
             }
 
-            const { count } = await query;
+            const { count, error: attemptError } = await query;
+            if (attemptError) {
+                throw attemptError;
+            }
+
+            logger.info('USER_ACTION', 'One-attempt generate precheck', {
+                configId,
+                userId: user.user.id,
+                cutoff,
+                count: count || 0,
+                hasExistingProgress: !!existingProgress
+            });
             
             if (count && count > 0) {
-                // If user already completed this quiz, and we are not resuming an in-progress session
-                // (Wait, if completed, there shouldn't be an in-progress session usually, but let's be safe)
-                // If there IS an in-progress session, it might be a zombie session or user re-opened before it was marked completed?
-                // But generally, if result exists, they are done.
-                // However, we should prioritize resuming if a session exists? 
-                // No, if result exists, they are DONE. Any in-progress session is likely stale or invalid if strict mode.
-                // But let's stick to the requirement: "Block if already attempted".
-                if (!existingProgress) {
-                     throw new Error("This quiz allows only one attempt and you have already completed it.");
+                if (existingProgress) {
+                    await supabase
+                        .from('quiz_progress')
+                        .update({ status: 'aborted', last_updated: Date.now() })
+                        .eq('id', existingProgress.id);
                 }
+                throw new Error("This quiz allows only one attempt and you have already submitted it.");
             }
         }
 

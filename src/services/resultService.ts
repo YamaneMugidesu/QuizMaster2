@@ -45,6 +45,55 @@ const mapResultFromDB = (r: DBResult): QuizResult => ({
 // --- API ---
 
 export const submitQuiz = async (configId: string, answers: { questionId: string, userAnswer: string }[], duration: number): Promise<QuizResult> => {
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData.user?.id;
+
+    if (userId) {
+        const { data: config, error: configError } = await supabase
+            .from('quiz_configs')
+            .select('allow_one_attempt, last_reset_at')
+            .eq('id', configId)
+            .single();
+
+        if (configError) {
+            logger.error('USER_ACTION', 'Error checking quiz config before submit', { configId, userId }, configError);
+            throw configError;
+        }
+
+        if (config?.allow_one_attempt) {
+            const cutoff = config.last_reset_at && config.last_reset_at > 0
+                ? (config.last_reset_at <= Date.now() ? config.last_reset_at : 0)
+                : 0;
+
+            let query = supabase
+                .from('quiz_results')
+                .select('id', { count: 'exact', head: true })
+                .eq('user_id', userId)
+                .eq('config_id', configId);
+
+            if (cutoff > 0) {
+                query = query.gt('timestamp', cutoff);
+            }
+
+            const { count, error: attemptError } = await query;
+            if (attemptError) {
+                logger.error('USER_ACTION', 'Error checking existing attempts before submit', { configId, userId }, attemptError);
+                throw attemptError;
+            }
+
+            logger.info('USER_ACTION', 'One-attempt submit precheck', {
+                configId,
+                userId,
+                cutoff,
+                count: count || 0
+            });
+
+            if ((count || 0) > 0) {
+                throw new Error('该试卷仅允许作答一次，您已提交过答卷。');
+            }
+        }
+    }
+
     // Call Secure RPC for server-side grading
     const { data, error } = await supabase.rpc('submit_quiz', {
         p_config_id: configId,
@@ -503,26 +552,29 @@ export const gradeQuizResult = async (
   }
 };
 
-export const hasUserCompletedQuiz = async (userId: string, configId: string, afterTimestamp: number = 0): Promise<boolean> => {
+export const hasUserAttemptedQuiz = async (userId: string, configId: string, afterTimestamp: number = 0): Promise<boolean> => {
+  const safeAfterTimestamp = afterTimestamp > 0 ? (afterTimestamp <= Date.now() ? afterTimestamp : 0) : 0;
+
   let query = supabase
     .from('quiz_results')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
-    .eq('config_id', configId)
-    .eq('status', 'completed'); // Only completed attempts count
+    .eq('config_id', configId);
 
-  if (afterTimestamp > 0) {
-      query = query.gt('timestamp', afterTimestamp);
+  if (safeAfterTimestamp > 0) {
+      query = query.gt('timestamp', safeAfterTimestamp);
   }
 
   const { count, error } = await query;
 
   if (error) {
-    console.error('Error checking if user completed quiz:', error);
-    return false; // Fail open or closed? Better fail open (allow retake) but log error? 
-    // Actually, fail closed might be safer if we want to enforce rules. 
-    // But let's return false and log it for now as per typical web app resilience.
+    console.error('Error checking if user attempted quiz:', error);
+    return false;
   }
   
   return (count || 0) > 0;
+};
+
+export const hasUserCompletedQuiz = async (userId: string, configId: string, afterTimestamp: number = 0): Promise<boolean> => {
+  return hasUserAttemptedQuiz(userId, configId, afterTimestamp);
 };

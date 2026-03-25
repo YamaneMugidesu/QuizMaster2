@@ -142,11 +142,18 @@ export const QuizTaker: React.FC<QuizTakerProps> = ({ configId, onComplete, onEx
             }
         } catch (error: any) {
             console.error("Failed to generate quiz:", error);
-            // Don't show toast if restored from local, unless it's a critical error like "Already Completed"
-            if (error.message && error.message.includes('already completed')) {
-                 addToast(error.message, "error");
-                 // Optional: Redirect or close
-                 setTimeout(() => onExit(), 2000);
+            const msg = String(error?.message || '');
+            const isOneAttemptError =
+                msg.includes('One attempt limit reached') ||
+                msg.includes('already completed') ||
+                msg.includes('already submitted') ||
+                msg.includes('仅允许作答一次') ||
+                msg.includes('已提交过答卷');
+
+            if (isOneAttemptError) {
+                localStorage.removeItem(key);
+                addToast('该试卷仅允许作答一次，您已提交过答卷', "error");
+                setTimeout(() => onExit(), 1500);
             } else if (!restoredFromLocal) {
                 addToast("无法加载试卷，请稍后重试", "error");
             }
