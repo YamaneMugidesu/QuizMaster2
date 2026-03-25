@@ -688,7 +688,7 @@ export const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ onSave }) => {
                                         )}
                                         {c.gradeLevels && c.gradeLevels.length > 0 && (
                                             <span className="inline-block px-1.5 py-0.5 text-[10px] font-medium rounded bg-purple-50 text-purple-600">
-                                                {c.gradeLevels.map(g => g === GradeLevel.PRIMARY ? '小学' : g === GradeLevel.JUNIOR ? '初中' : '高中').join(', ')}
+                                                {c.gradeLevels.map(g => g === GradeLevel.PRIMARY ? '小学' : g === GradeLevel.JUNIOR ? '初中' : g === GradeLevel.SENIOR ? '高中' : '综合').join(', ')}
                                             </span>
                                         )}
                                     </div>

@@ -149,7 +149,7 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange,
             theme="snow"
             value={value}
             onChange={(content, delta, source, editor) => {
-                if (source === 'user') {
+                if (source !== 'silent') {
                     onChange(content);
                 }
             }}
